@@ -222,7 +222,7 @@ scatter!(p,legend=false)
 # Test bayesian fitting
 
 σ = 0.01
-N = 1000
+N = 500
 deg = 2
 x = collect(1:N)
 V = 1.0 .+ sin.(x/100.0)
