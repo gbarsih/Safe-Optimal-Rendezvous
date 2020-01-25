@@ -64,16 +64,16 @@ end
 @recipe function f(p::Prediction1D)
     legend --> false
     @series begin
-        fillcolor --> :blue
+        fillcolor --> :white
         fillalpha --> 0.2
         linewidth --> 1.0
-        linecolor --> :blue
+        linecolor --> :white
         ribbon := p.σ
         (p.Xt, p.μ)
     end
     @series begin
         linewidth --> 2.0
-        linecolor --> :black
+        linecolor --> :yellow
         linestyle --> :dash
         (p.Xt, p.Yt)
     end

@@ -20,7 +20,7 @@ Requirements:   JuMP, Ipopt, Plots, LinearAlgebra, BenchmarkTools.
 
 using JuMP, Ipopt
 using Plots, LinearAlgebra
-default(dpi=100)
+default(dpi=600)
 using BenchmarkTools
 using Random
 using RecipesBase
@@ -30,7 +30,7 @@ import Random.seed!
 using SymPy
 include("bayeslin.jl")
 
-function solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,xp,yp,Φ)
+function solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,xp,yp)
 
     #Input variables:
     #   x0:         initial x
@@ -134,9 +134,25 @@ function path(θ)
     return x, y
 end
 
-function path_var(θ)
-    var = θ
+θ̇(θ) = 0.1
+
+function sim_path(θ̇, N, θ₀, tf)
+    dt = tf/N
+    θ = zeros(N)
+    θ[1] = θ₀
+    for i=2:N
+        θ[i] = θ[i-1] + θ̇(θ[i-1])*dt
+    end
+
+    if maximum(θ) > 1.0 || minimum(θ) < 0.0
+        @show maximum(θ) minimum(θ)
+        error("Θ outside unit interval!")
+    end
+
+    return θ
 end
+
+
 
 function gen_A(σ,V,deg)
     Φ = basis_func(V,deg)
@@ -152,10 +168,10 @@ function μ_w(σ,V,deg,Y)
     μ = 1/σ^2*inv(A)*basis_func(V,deg)*Y
 end
 
-function plot_path(n)
+function plot_path(n, bg="white")
     θ = Array(0:1.0/n:1)
     x, y = path(θ)
-    plot!(x,y)
+    plot!(x,y,background_color=bg)
 end
 
 function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:5; seeded=false)
@@ -165,7 +181,7 @@ function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:5; seeded=false)
     if seeded
         seed!(1729)
     end
-    Xo = rand(N) #random samples
+    Xo = 2 ./3 * rand(N) .+ 1/3 #random samples
     Yo = D.(Xo, β) #observed deviation
     Xt = collect(-0.0:0.005:1.2)
     Yt = D.(Xt) #actual deviation
@@ -181,8 +197,6 @@ function fit_weights(N, α=0.005, β=1/(0.3^2), r=0:5)
     μ, Σ = posterior(Yo, polynomial(Xo, r), α, β)
 end
 
-θ̇(θ) = 0.1
-
 function dynamics(x, y, vx, vy, tmax, dt, rem_power)
     x           = x + vx*dt
     y           = y + vy*dt
@@ -192,9 +206,9 @@ function dynamics(x, y, vx, vy, tmax, dt, rem_power)
 end
 
 function run_fit()
-    N = 1000
-    model = fit_behavior(N, 0.005, 1/(0.1^2), 0:5)
-    plot(model, xlabel="Historic Speed", ylabel="Driver's Speed")
+    N = 50
+    model = fit_behavior(N, 0.005, 1/(0.1^2), 0:3)
+    plot(model, xlabel="Historic Speed", ylabel="Driver's Speed",background_color="black")
 end
 
 x0          = 0.0
@@ -234,10 +248,10 @@ println("Checking constraints:")
 @show Σs Σt Δt
 
 
-plot(x[1:4],y[1:4])
-scatter!(x[1:4],y[1:4])
-plot_path(100)
-scatter!(p,legend=false)
+plot(x[1:4],y[1:4],background_color="black")
+scatter!(x[1:4],y[1:4],background_color="black")
+plot_path(100,"black")
+scatter!(p,legend=false,background_color="black")
 
 
 run_fit()
