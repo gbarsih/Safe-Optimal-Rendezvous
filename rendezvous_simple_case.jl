@@ -27,9 +27,10 @@ using RecipesBase
 using SparseArrays
 import Distributions: MvNormal
 import Random.seed!
+using SymPy
 include("bayeslin.jl")
 
-function solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,xp,yp)
+function solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,xp,yp,Φ)
 
     #Input variables:
     #   x0:         initial x
@@ -157,12 +158,43 @@ function plot_path(n)
     plot!(x,y)
 end
 
+function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:5; seeded=false)
+    #D(v,β=Inf) = 0.0 + 1.1*v + 0.1*sin(1*pi*v) + 1/β*randn()
+    D(v,β=Inf) = 2/(1+exp(-5*v)) - 1 + 1/β*randn()
+    #deviation function, from θ̇.
+    if seeded
+        seed!(1729)
+    end
+    Xo = rand(N) #random samples
+    Yo = D.(Xo, β) #observed deviation
+    Xt = collect(-0.0:0.005:1.2)
+    Yt = D.(Xt) #actual deviation
+    μ, Σ = posterior(Yo, polynomial(Xo, r), α, β)
+    @show μ
+    regress(Xo, Yo, Xt, Yt, polynomial, α, β, r)
+end
+
+function fit_weights(N, α=0.005, β=1/(0.3^2), r=0:5)
+    D(v,β=Inf) = 5.0 + v + 1*sin(1.1*pi*v) + 1/β*randn()
+    Xo = (2 .*rand(N) .- 1) .+ 40 #some velocity variation around 40MPH
+    Yo = D.(Xo, β) #observed deviation
+    μ, Σ = posterior(Yo, polynomial(Xo, r), α, β)
+end
+
+θ̇(θ) = 0.1
+
 function dynamics(x, y, vx, vy, tmax, dt, rem_power)
     x           = x + vx*dt
     y           = y + vy*dt
     tmax        = tmax - dt
     rem_power   = rem_power - vx^2*dt + vy^2*dt #TODO check if this is correct
     return x, y, tmax, rem_power
+end
+
+function run_fit()
+    N = 1000
+    model = fit_behavior(N, 0.005, 1/(0.1^2), 0:5)
+    plot(model, xlabel="Historic Speed", ylabel="Driver's Speed")
 end
 
 x0          = 0.0
@@ -201,17 +233,6 @@ println("Cheking Rendezvous condition")
 println("Checking constraints:")
 @show Σs Σt Δt
 
-nsteps  = floor(Int, tmax/dt)
-xh      = zeros(nsteps)
-yh      = zeros(nsteps)
-vxh     = zeros(nsteps)
-vyh     = zeros(nsteps)
-th      = zeros(nsteps)
-
-xh[1] = x0
-yh[1] = y0
-
-i = 2
 
 plot(x[1:4],y[1:4])
 scatter!(x[1:4],y[1:4])
@@ -219,14 +240,16 @@ plot_path(100)
 scatter!(p,legend=false)
 
 
-# Test bayesian fitting
+run_fit()
 
+
+"""
 σ = 0.01
-N = 500
+N = 1000
 deg = 2
 x = collect(1:N)
 V = 1.0 .+ sin.(x/100.0)
-Y = σ.^2 .*randn(N) .+ 0.5 + 2 .*sin.(x/200.0)
+Y = σ.^2 .*randn(N) .+ 0.5 + 2 .*cos.(x/100.0)
 
 μ = μ_w(σ,V,deg,Y)
 @show μ
@@ -242,21 +265,8 @@ for i = 1:N
     T[i] = temp
 end
 
-#plot(x,V)
+
 plot(x,Y)
 plot!(x,T)
-
-
-#=
-    for t = dt:dt:dt
-    @global x y
-        x, y, vx, vy, t =
-            solveRDV(x[1],y[1],Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power)
-        x[1], y[1], tmax, rem_power =
-            dynamics(x[1], y[1], vx[1], vy[1], tmax, rem_power)
-
-       xh[i] = x[1]
-        yh[i] = y[1]
-
-    end #end for
-=#
+#plot!(x,V)
+"""
