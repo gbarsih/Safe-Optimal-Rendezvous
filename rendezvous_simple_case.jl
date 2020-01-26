@@ -30,7 +30,7 @@ import Random.seed!
 using SymPy
 include("bayeslin.jl")
 
-function solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,xp,yp)
+function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σ,θ)
 
     #Input variables:
     #   x0:         initial x
@@ -46,19 +46,18 @@ function solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,xp,yp)
     #   xp:         previous x solution
     #   yp:         previous y solution
 
-    RDV = Model(with_optimizer(Ipopt.Optimizer,max_iter=50,print_level=0))
+    RDV = Model(with_optimizer(Ipopt.Optimizer,max_iter=50))
     #RDV = Model(solver=CbcSolver(PrimalTolerance=1e-10))
     @variable(RDV, x[i=1:5]) #states
     @variable(RDV, y[i=1:5]) #states
-
     #x[1] : initial condition
     #x[2] : Point of no Return
     #x[3] : Rendezvous
     #x[4] : Landing
     #x[5] : PNR -> Landing
 
-    @variable(RDV, vmin <= vx[i=1:4] <= vmax) #controls
-    @variable(RDV, vmin <= vy[i=1:4] <= vmax) #controls
+    @variable(RDV, -vmax <= vx[i=1:4] <= vmax) #controls
+    @variable(RDV, -vmax <= vy[i=1:4] <= vmax) #controls
 
     #v[1] : Velocity up to Point of no Return
     #v[2] : V up to Rendezvous
@@ -95,7 +94,10 @@ function solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,xp,yp)
 
     @NLconstraint(RDV, sum((vx[i]^2 + vy[i]^2)*t[i] for i=1:3) <= rem_power)
     #TODO fix
-    θ_R = @NLexpression(RDV, sum(t[i] for i=1:2)/tmax)
+    T_R = @expression(RDV, sum(t[i] for i=1:2))
+    #0.1 is θ̇(t)
+    r = length( μ )
+    θ_R = @expression(RDV, θ + (T_R - t0)*0.1 + (T_R - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))
     #@NLconstraint(RDV, c1, abs(x[3] - ( 5 + 0.5 * sin(2*pi*θ_R ))) <= βx)
     #@NLconstraint(RDV, c2, abs(y[3] - ( 2 * θ_R - 1 )) <= βy)
     #TODO see JuMP documentation to check constraint satisfaction
@@ -103,9 +105,12 @@ function solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,xp,yp)
     # Solution: constraints satisfied with slack variables
     #@constraint(RDV, x[3] == Rx) #fixed rdv location
     #@constraint(RDV, y[3] == Ry)
-    @NLconstraint(RDV, c1, x[3] == ( 5 + 4.5 * sin(2*pi*θ_R )))
-    @NLconstraint(RDV, c2, y[3] == ( 2 * θ_R - 1 ))
-    @NLconstraint(RDV, c3, θ_R <= 0.25)
+    @NLconstraint(RDV, x[3] ==
+        5 + 4.5 * sin(2*pi*(θ + (sum(t[i] for i=1:2)
+        - t0)*0.1 + (sum(t[i] for i=1:2)
+        - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))))
+    @constraint(RDV, y[3] == ( 2 * θ_R - 1 ))
+    @constraint(RDV, θ_R <= 1.0)
     @constraint(RDV, x[4] == Lx)
     @constraint(RDV, y[4] == Ly)
 
@@ -115,7 +120,8 @@ function solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,xp,yp)
 
     #β = [value.(βx) value.(βy)]
     #@show β
-    θ_R = sum(value.(t)[1:2])/tmax
+    T_R = sum(value.(t)[i] for i=1:2)
+    θ_R = θ + (T_R - t0)*(0.1 + sum(μ[i]*0.1^(i-1) for i=1:r))
 
     return value.(x), value.(y), value.(vx), value.(vy), value.(t), θ_R
 
@@ -134,7 +140,7 @@ function path(θ)
     return x, y
 end
 
-θ̇(θ) = 0.1
+θ̇(t) = 0.1
 
 function sim_path(θ̇, N, θ₀, tf)
     dt = tf/N
@@ -174,14 +180,14 @@ function plot_path(n, bg="white")
     plot!(x,y,background_color=bg)
 end
 
-function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:5; seeded=false)
+function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:3; seeded=false)
     #D(v,β=Inf) = 0.0 + 1.1*v + 0.1*sin(1*pi*v) + 1/β*randn()
-    D(v,β=Inf) = 2/(1+exp(-5*v)) - 1 + 1/β*randn()
+    D(v,β=Inf) = 2/(1+exp(-2*v)) - 1 + 1/β*randn()
     #deviation function, from θ̇.
     if seeded
         seed!(1729)
     end
-    Xo = 2 ./3 * rand(N) .+ 1/3 #random samples
+    Xo = 2 ./3 * rand(N) .+ 0/3 #random samples
     Yo = D.(Xo, β) #observed deviation
     Xt = collect(-0.0:0.005:1.2)
     Yt = D.(Xt) #actual deviation
@@ -190,9 +196,9 @@ function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:5; seeded=false)
     regress(Xo, Yo, Xt, Yt, polynomial, α, β, r)
 end
 
-function fit_weights(N, α=0.005, β=1/(0.3^2), r=0:5)
-    D(v,β=Inf) = 5.0 + v + 1*sin(1.1*pi*v) + 1/β*randn()
-    Xo = (2 .*rand(N) .- 1) .+ 40 #some velocity variation around 40MPH
+function fit_weights(N, α=0.005, β=1/(0.1^2), r=0:3)
+    D(v,β=Inf) = 2/(1+exp(-2*v)) - 1 + 1/β*randn()
+    Xo = 2 ./3 * rand(N) .+ 0/3 #random samples
     Yo = D.(Xo, β) #observed deviation
     μ, Σ = posterior(Yo, polynomial(Xo, r), α, β)
 end
@@ -211,13 +217,21 @@ function run_fit()
     plot(model, xlabel="Historic Speed", ylabel="Driver's Speed",background_color="black")
 end
 
+function plot_sol()
+    plot(x[1:4],y[1:4],background_color="black")
+    scatter!(x[1:4],y[1:4],background_color="black")
+    plot_path(100,"black")
+    scatter!(p,legend=false,background_color="black")
+end
+
 x0          = 0.0
 y0          = 0.0
+t0          = 0.0
+θ0          = 0.0
 Lx          = 0.0
 Ly          = 0.0
 Rx          = 1.0
 Ry          = 1.0
-vmin        = -10.0
 vmax        = 10.0
 tmax        = 10.0
 dt          = 0.1
@@ -228,14 +242,15 @@ clearconsole()
 #@btime solveRDV($x0,$y0,$Lx,$Ly,$Rx,$Ry,$vmin,$vmax,$tmax,$rem_power,$x0,$y0)
 #@show bench
 
-x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,Lx,Ly,Rx,Ry,vmin,vmax,tmax,rem_power,x0,y0)
+μ, Σ = fit_weights(100)
+
+x, y, vx, vy, t, θ_R = solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σ,θ0)
 
 @show θ_R
 
 Σs = sum(sqrt.(x.^2+y.^2))
 Σt = sum(t)
 Δt = Σt - tmax
-θ_R = sum(t[1:2])/tmax
 p = path(θ_R)
 Δx = abs(x[3] - p[1])
 Δy = abs(y[3] - p[2])
@@ -248,10 +263,6 @@ println("Checking constraints:")
 @show Σs Σt Δt
 
 
-plot(x[1:4],y[1:4],background_color="black")
-scatter!(x[1:4],y[1:4],background_color="black")
-plot_path(100,"black")
-scatter!(p,legend=false,background_color="black")
 
 
 run_fit()
