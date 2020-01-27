@@ -25,12 +25,12 @@ using BenchmarkTools
 using Random
 using RecipesBase
 using SparseArrays
+using Statistics
 import Distributions: MvNormal
 import Random.seed!
-using SymPy
 include("bayeslin.jl")
 
-function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σ,θ)
+function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ)
 
     #Input variables:
     #   x0:         initial x
@@ -46,7 +46,7 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σ,θ)
     #   xp:         previous x solution
     #   yp:         previous y solution
 
-    RDV = Model(with_optimizer(Ipopt.Optimizer,max_iter=50))
+    RDV = Model(with_optimizer(Ipopt.Optimizer,max_iter=50,print_level=0))
     #RDV = Model(solver=CbcSolver(PrimalTolerance=1e-10))
     @variable(RDV, x[i=1:5]) #states
     @variable(RDV, y[i=1:5]) #states
@@ -66,13 +66,11 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σ,θ)
 
     @variable(RDV, 1.0 <= t[i=1:4]) #controls
 
-    #@variable(RDV, 0 <= βx) #slack variables
-    #@variable(RDV, 0 <= βy)
-
     @NLobjective(RDV, Min,
                   1.0*sum(vx[i]^2*t[i] + vy[i]^2*t[i] for i=1:2) #delivery
                 + 0.5*(vx[3]^2*t[3] + vy[3]^2*t[3]) #cost fcn after delivery
                 + 1.0*sum(t[i] for i=2:4)   #cost fcn min time
+                + 0.0*sum(t[i] for i=1:2)*Σint
                 - 1.0*t[1]) #cost fcn max decision time
                 #+ 0.0*(βx + βy)) #slack minimization
 
@@ -98,19 +96,15 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σ,θ)
     #0.1 is θ̇(t)
     r = length( μ )
     θ_R = @expression(RDV, θ + (T_R - t0)*0.1 + (T_R - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))
-    #@NLconstraint(RDV, c1, abs(x[3] - ( 5 + 0.5 * sin(2*pi*θ_R ))) <= βx)
-    #@NLconstraint(RDV, c2, abs(y[3] - ( 2 * θ_R - 1 )) <= βy)
-    #TODO see JuMP documentation to check constraint satisfaction
-    # Problem:  adding NL constraint to x AND y makes the problem very hard
-    # Solution: constraints satisfied with slack variables
-    #@constraint(RDV, x[3] == Rx) #fixed rdv location
-    #@constraint(RDV, y[3] == Ry)
+
     @NLconstraint(RDV, x[3] ==
         5 + 4.5 * sin(2*pi*(θ + (sum(t[i] for i=1:2)
         - t0)*0.1 + (sum(t[i] for i=1:2)
         - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))))
     @constraint(RDV, y[3] == ( 2 * θ_R - 1 ))
+    @NLconstraint(RDV, sum(t[i] for i=1:2)^2 * Σint <= 0.1)
     @constraint(RDV, θ_R <= 1.0)
+    @constraint(RDV, 0.0 <= θ_R )
     @constraint(RDV, x[4] == Lx)
     @constraint(RDV, y[4] == Ly)
 
@@ -118,8 +112,6 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σ,θ)
 
     optimize!(RDV)
 
-    #β = [value.(βx) value.(βy)]
-    #@show β
     T_R = sum(value.(t)[i] for i=1:2)
     θ_R = θ + (T_R - t0)*(0.1 + sum(μ[i]*0.1^(i-1) for i=1:r))
 
@@ -140,7 +132,8 @@ function path(θ)
     return x, y
 end
 
-θ̇(t) = 0.1
+#θ̇(t) = 0.1
+θ̇(t) = 0.2*(0.5 + 0.25*cos(4*pi*t/10))
 
 function sim_path(θ̇, N, θ₀, tf)
     dt = tf/N
@@ -180,7 +173,7 @@ function plot_path(n, bg="white")
     plot!(x,y,background_color=bg)
 end
 
-function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:3; seeded=false)
+function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:2; seeded=false)
     #D(v,β=Inf) = 0.0 + 1.1*v + 0.1*sin(1*pi*v) + 1/β*randn()
     D(v,β=Inf) = 2/(1+exp(-2*v)) - 1 + 1/β*randn()
     #deviation function, from θ̇.
@@ -196,7 +189,7 @@ function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:3; seeded=false)
     regress(Xo, Yo, Xt, Yt, polynomial, α, β, r)
 end
 
-function fit_weights(N, α=0.005, β=1/(0.1^2), r=0:3)
+function fit_weights(N, α=0.005, β=1/(0.3^2), r=0:2)
     D(v,β=Inf) = 2/(1+exp(-2*v)) - 1 + 1/β*randn()
     Xo = 2 ./3 * rand(N) .+ 0/3 #random samples
     Yo = D.(Xo, β) #observed deviation
@@ -212,16 +205,16 @@ function dynamics(x, y, vx, vy, tmax, dt, rem_power)
 end
 
 function run_fit()
-    N = 50
-    model = fit_behavior(N, 0.005, 1/(0.1^2), 0:3)
+    N = 100
+    model = fit_behavior(N, 0.005, 1/(0.3^2), 0:2)
     plot(model, xlabel="Historic Speed", ylabel="Driver's Speed",background_color="black")
 end
 
-function plot_sol()
-    plot(x[1:4],y[1:4],background_color="black")
-    scatter!(x[1:4],y[1:4],background_color="black")
-    plot_path(100,"black")
-    scatter!(p,legend=false,background_color="black")
+function plot_sol(bg="black")
+    plot(x[1:4],y[1:4],background_color=bg)
+    scatter!(x[1:4],y[1:4],background_color=bg)
+    plot_path(100,bg)
+    scatter!(p,legend=false,background_color=bg)
 end
 
 x0          = 0.0
@@ -242,11 +235,17 @@ clearconsole()
 #@btime solveRDV($x0,$y0,$Lx,$Ly,$Rx,$Ry,$vmin,$vmax,$tmax,$rem_power,$x0,$y0)
 #@show bench
 
-μ, Σ = fit_weights(100)
+μ, Σ = fit_weights(1000)
 
-x, y, vx, vy, t, θ_R = solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σ,θ0)
+θf(t) = 0.1 + sin(t)
+Σint = (0.1.^collect(1:length(μ))'*Σ*0.1.^collect(1:length(μ)))[1]
+Σf(t) = (θf(t).^collect(1:length(μ))'*Σ*θf(t).^collect(1:length(μ)))[1]
 
-@show θ_R
+x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ0)
+
+T_R = sum(t[1:2])
+risk = T_R * Σint
+@show θ_R T_R risk
 
 Σs = sum(sqrt.(x.^2+y.^2))
 Σt = sum(t)
