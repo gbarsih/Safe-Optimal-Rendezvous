@@ -20,7 +20,6 @@ Requirements:   JuMP, Ipopt, Plots, LinearAlgebra, BenchmarkTools.
 
 using JuMP, Ipopt
 using Plots, LinearAlgebra
-default(dpi=600)
 using BenchmarkTools
 using Random
 using RecipesBase
@@ -29,24 +28,11 @@ using Statistics
 import Distributions: MvNormal
 import Random.seed!
 include("bayeslin.jl")
+default(dpi=600)
 
-function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ)
+function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ,Σf,ϕf)
 
-    #Input variables:
-    #   x0:         initial x
-    #   xy:         initial y
-    #   Lx:         Landing location x
-    #   Ly:         Landing location y
-    #   Rx:         Rendezvous location x
-    #   Ry:         Rendezvous location y
-    #   vmin:       minimum velocity
-    #   vmax:       maximum velocity
-    #   tmax:       max mission time
-    #   rem_power:  battery remaining power
-    #   xp:         previous x solution
-    #   yp:         previous y solution
-
-    RDV = Model(with_optimizer(Ipopt.Optimizer,max_iter=50,print_level=0))
+    RDV = Model(with_optimizer(Ipopt.Optimizer,max_iter=100,tol=1e-3))
     #RDV = Model(solver=CbcSolver(PrimalTolerance=1e-10))
     @variable(RDV, x[i=1:5]) #states
     @variable(RDV, y[i=1:5]) #states
@@ -64,15 +50,14 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ)
     #v[3] : V up to landing
     #v[4] : PNR -> Landing
 
-    @variable(RDV, 1.0 <= t[i=1:4]) #controls
+    @variable(RDV, 0.5 <= t[i=1:4]) #controls
 
     @NLobjective(RDV, Min,
-                  1.0*sum(vx[i]^2*t[i] + vy[i]^2*t[i] for i=1:2) #delivery
+                  1.0*sum(vx[i]^2*t[i] + vy[i]^2*t[i] for i=[1 2 4]) #delivery
                 + 0.5*(vx[3]^2*t[3] + vy[3]^2*t[3]) #cost fcn after delivery
                 + 1.0*sum(t[i] for i=2:4)   #cost fcn min time
                 + 0.0*sum(t[i] for i=1:2)*Σint
-                - 1.0*t[1]) #cost fcn max decision time
-                #+ 0.0*(βx + βy)) #slack minimization
+                - 10.0*t[1]) #cost fcn max decision time
 
     @constraint(RDV, x[1] == x0) #initial conditions
     @constraint(RDV, y[1] == y0)
@@ -94,17 +79,21 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ)
     #TODO fix
     T_R = @expression(RDV, sum(t[i] for i=1:2))
     #0.1 is θ̇(t)
-    r = length( μ )
-    θ_R = @expression(RDV, θ + (T_R - t0)*0.1 + (T_R - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))
-
-    @NLconstraint(RDV, x[3] ==
-        5 + 4.5 * sin(2*pi*(θ + (sum(t[i] for i=1:2)
-        - t0)*0.1 + (sum(t[i] for i=1:2)
-        - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))))
+    r = length(μ)
+    #θ_R = @expression(RDV, θ + (T_R - t0)*0.1 + (T_R - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))
+    register(RDV, :ϕf, 2, ϕf, autodiff=true)
+    #θ_R = @NLexpression(RDV, θ + μ'*ϕf(t0,T_R))
+    #@NLconstraint(RDV, x[3] ==
+    #    5 + 4.5 * sin(2*pi*(θ + (sum(t[i] for i=1:2)
+    #    - t0)*0.1 + (sum(t[i] for i=1:2)
+    #    - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))))
+    @variable(RDV, aux)
+    @constraint(aux == t[1]+t[1])
+    @NLconstraint(RDV, x[3] == 5+4.5*sin(2*pi*(θ + sum(μ[i]*ϕf(t0,t[1]+t[2])[i] for i in 1:r))))
     @constraint(RDV, y[3] == ( 2 * θ_R - 1 ))
     @NLconstraint(RDV, sum(t[i] for i=1:2)^2 * Σint <= 0.1)
-    @constraint(RDV, θ_R <= 1.0)
-    @constraint(RDV, 0.0 <= θ_R )
+    @NLconstraint(RDV, θ + μ'*ϕf(t0,T_R) <= 1.0)
+    @NLconstraint(RDV, 0.0 <= θ + μ'*ϕf(t0,T_R) )
     @constraint(RDV, x[4] == Lx)
     @constraint(RDV, y[4] == Ly)
 
@@ -117,13 +106,6 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ)
 
     return value.(x), value.(y), value.(vx), value.(vy), value.(t), θ_R
 
-    #returns:
-    #   x:      x waypoints
-    #   y:      y waypoints
-    #   vx:     velocities in x
-    #   vy:     velocities in y
-    #   t:      times to spend at those velocities
-
 end
 
 function path(θ)
@@ -133,7 +115,7 @@ function path(θ)
 end
 
 #θ̇(t) = 0.1
-θ̇(t) = 0.2*(0.5 + 0.25*cos(4*pi*t/10))
+θ̇(t) = (0.1 + 0.05*cos(4*pi*t/10))
 
 function sim_path(θ̇, N, θ₀, tf)
     dt = tf/N
@@ -228,7 +210,7 @@ Ry          = 1.0
 vmax        = 10.0
 tmax        = 10.0
 dt          = 0.1
-rem_power   = 50.0
+rem_power   = 50000.0
 
 clearconsole()
 
@@ -239,9 +221,22 @@ clearconsole()
 
 θf(t) = 0.1 + sin(t)
 Σint = (0.1.^collect(1:length(μ))'*Σ*0.1.^collect(1:length(μ)))[1]
-Σf(t) = (θf(t).^collect(1:length(μ))'*Σ*θf(t).^collect(1:length(μ)))[1]
+#Σf(t) = (θf(t).^collect(1:length(μ))'*Σ*θf(t).^collect(1:length(μ)))[1]
 
-x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ0)
+"""
+Functions for slow corner speeds.
+"""
+#ϕf(t1,t2) = [t2-t1
+#    -0.1*t1-0.0397887*sin((2*π*t1)/5)+0.1*t2+0.0397887*sin((2*π*t2)/5)
+#    -0.01125*t1-0.00795775*sin((2*π*t1)/5)-0.000497359*sin((4*π*t1)/5)+0.01125*t2+0.00795775*sin((2*π*t2)/5)+0.000497359*sin((4*π*t2)/5)]
+ϕf(t1,t2) = [t2 - t1,
+    t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi),
+    (9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40
+    + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40
+    + sin((4*t2*pi)/5)/640)/pi]
+Σf(t1,t2)=ϕf(t1,t2)'*Σ*ϕf(t1,t2)
+
+x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ0,Σf,ϕf)
 
 T_R = sum(t[1:2])
 risk = T_R * Σint

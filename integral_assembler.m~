@@ -1,0 +1,13 @@
+
+clc
+clear
+
+r = 2;
+mu = sym('mu_%d',[1 r+1])
+phi = sym('phi_%d',[1 r+1])
+syms t
+
+theta = (0.1 + 0.05*cos(4*pi*t/10))
+
+
+
