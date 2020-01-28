@@ -7,6 +7,7 @@ mu = sym('mu_%d',[1 r+1]);
 phi = sym('phi_%d',[1 r+1]);
 syms theta_d
 syms t t1 t2
+syms tt
 
 theta = (0.1 + 0.05*cos(4*pi*t/10));
 
@@ -22,4 +23,10 @@ end
 phi_s = char(phi);
 phi_s([1:8, end-1:end]) = []
 simplify(theta_d)
-simplify(phi)
+%simplify(sin(5+4.5*sin(2*pi*(tt + theta_d))))
+simplify((tt + theta_d))
+
+Sigma = sym('S', [3 3])
+Psi = sym('P',[3 1])
+
+simplify(Psi.'*Sigma*Psi)

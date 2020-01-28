@@ -30,9 +30,9 @@ import Random.seed!
 include("bayeslin.jl")
 default(dpi=600)
 
-function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ,Σf,ϕf)
+function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ)
 
-    RDV = Model(with_optimizer(Ipopt.Optimizer,max_iter=100,tol=1e-3))
+    RDV = Model(with_optimizer(Ipopt.Optimizer,max_iter=1000))
     #RDV = Model(solver=CbcSolver(PrimalTolerance=1e-10))
     @variable(RDV, x[i=1:5]) #states
     @variable(RDV, y[i=1:5]) #states
@@ -50,7 +50,7 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ,Σf,ϕf)
     #v[3] : V up to landing
     #v[4] : PNR -> Landing
 
-    @variable(RDV, 0.5 <= t[i=1:4]) #controls
+    @variable(RDV, 1.0 <= t[i=1:4]) #controls
 
     @NLobjective(RDV, Min,
                   1.0*sum(vx[i]^2*t[i] + vy[i]^2*t[i] for i=[1 2 4]) #delivery
@@ -81,19 +81,56 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ,Σf,ϕf)
     #0.1 is θ̇(t)
     r = length(μ)
     #θ_R = @expression(RDV, θ + (T_R - t0)*0.1 + (T_R - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))
-    register(RDV, :ϕf, 2, ϕf, autodiff=true)
-    #θ_R = @NLexpression(RDV, θ + μ'*ϕf(t0,T_R))
+    t1 = t0
+    t2 = @expression(RDV, t[2])
+    #=θ_R = @NLexpression(RDV, sin((9*sin(2*pi*θ
+    - (μ[2]*sin((2*pi*t1)/5))/4
+    + (μ[2]*sin((2*pi*t2)/5))/4
+    - (μ[3]*sin((2*pi*t1)/5))/20
+    + (μ[3]*sin((2*pi*t2)/5))/20
+    - (μ[3]*sin((4*pi*t1)/5))/320
+    + (μ[3]*sin((4*pi*t2)/5))/320
+    - 2*pi*μ[1]*t1
+    + 2*pi*μ[1]*t2
+    - (pi*μ[2]*t1)/5
+    + (pi*μ[2]*t2)/5
+    - (9*pi*μ[3]*t1)/400
+    + (9*pi*μ[3]*t2)/400))/2 + 5))=#
+    #=θ_R = @NLexpression(RDV, θ - μ[1]*(t1 - t2)
+    - μ[3]*((9*t1)/800 - (9*t2)/800 + (sin((2*pi*t1)/5)/40
+    + sin((4*pi*t1)/5)/640)/pi - (sin((2*pi*t2)/5)/40
+    + sin((4*pi*t2)/5)/640)/pi) - μ[2]*(t1/10 - t2/10
+    + (sin((2*pi*t1)/5) - sin((2*pi*t2)/5))/(8*pi)))=#
+
+    θ_R = @NLexpression(RDV, θ + μ[1]*((t[1] + t[2]) - t1) +
+        μ[2]*((t[1] + t[2])/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*(t[1]
+        + t[2])*pi)/5))/(8*pi)) +
+        μ[3]*((9*(t[1] + t[2]))/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40
+        + sin((4*t1*pi)/5)/640)/pi + (sin((2*(t[1] + t[2])*pi)/5)/40
+        + sin((4*(t[1] + t[2])*pi)/5)/640)/pi))
+    P1 = @NLexpression(RDV, (t[1] + t[2]) - t1)
+    P2 = @NLexpression(RDV, (t[1] + t[2])/10 - t1/10 - (sin((2*t1*pi)/5) -
+        sin((2*(t[1] + t[2])*pi)/5))/(8*pi))
+    P3 = @NLexpression(RDV, (9*(t[1] + t[2]))/800 - (9*t1)/800 -
+        (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi +
+        (sin((2*(t[1] + t[2])*pi)/5)/40 + sin((4*(t[1] +
+        t[2])*pi)/5)/640)/pi)
+
+    Σv = @NLexpression(RDV, P1*(P1*Σ[1,1] +
+                            P2*Σ[2,1] + P3*Σ[3,1]) +
+                            P2*(P1*Σ[1,2] + P2*Σ[2,2] + P3*Σ[3,2]) +
+                            P3*(P1*Σ[1,3] + P2*Σ[2,3] + P3*Σ[3,3]))
+
     #@NLconstraint(RDV, x[3] ==
     #    5 + 4.5 * sin(2*pi*(θ + (sum(t[i] for i=1:2)
     #    - t0)*0.1 + (sum(t[i] for i=1:2)
     #    - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))))
-    @variable(RDV, aux)
-    @constraint(aux == t[1]+t[1])
-    @NLconstraint(RDV, x[3] == 5+4.5*sin(2*pi*(θ + sum(μ[i]*ϕf(t0,t[1]+t[2])[i] for i in 1:r))))
-    @constraint(RDV, y[3] == ( 2 * θ_R - 1 ))
-    @NLconstraint(RDV, sum(t[i] for i=1:2)^2 * Σint <= 0.1)
-    @NLconstraint(RDV, θ + μ'*ϕf(t0,T_R) <= 1.0)
-    @NLconstraint(RDV, 0.0 <= θ + μ'*ϕf(t0,T_R) )
+    @NLconstraint(RDV, x[3] == 5 + 4.5 * sin(2*pi*θ_R))
+    @NLconstraint(RDV, y[3] == ( 2 * θ_R - 1 ))
+    #@NLconstraint(RDV, sum(t[i] for i=1:2)^2 * Σint <= 0.1)
+    @NLconstraint(RDV, Σv <= 100000.15)
+    @NLconstraint(RDV, θ_R <= 1.0)
+    @NLconstraint(RDV, 0.0 <= θ_R)
     @constraint(RDV, x[4] == Lx)
     @constraint(RDV, y[4] == Ly)
 
@@ -101,8 +138,13 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ,Σf,ϕf)
 
     optimize!(RDV)
 
-    T_R = sum(value.(t)[i] for i=1:2)
-    θ_R = θ + (T_R - t0)*(0.1 + sum(μ[i]*0.1^(i-1) for i=1:r))
+    t2 = sum(value.(t)[i] for i=1:2)
+    t1 = t0
+    θ_R = θ + μ[1]*(t2 - t1) +
+        μ[2]*(t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi)) +
+        μ[3]*((9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40
+        + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40
+        + sin((4*t2*pi)/5)/640)/pi)
 
     return value.(x), value.(y), value.(vx), value.(vy), value.(t), θ_R
 
@@ -217,7 +259,7 @@ clearconsole()
 #@btime solveRDV($x0,$y0,$Lx,$Ly,$Rx,$Ry,$vmin,$vmax,$tmax,$rem_power,$x0,$y0)
 #@show bench
 
-μ, Σ = fit_weights(1000)
+μ, Σ = fit_weights(100)
 
 θf(t) = 0.1 + sin(t)
 Σint = (0.1.^collect(1:length(μ))'*Σ*0.1.^collect(1:length(μ)))[1]
@@ -229,17 +271,25 @@ Functions for slow corner speeds.
 #ϕf(t1,t2) = [t2-t1
 #    -0.1*t1-0.0397887*sin((2*π*t1)/5)+0.1*t2+0.0397887*sin((2*π*t2)/5)
 #    -0.01125*t1-0.00795775*sin((2*π*t1)/5)-0.000497359*sin((4*π*t1)/5)+0.01125*t2+0.00795775*sin((2*π*t2)/5)+0.000497359*sin((4*π*t2)/5)]
-ϕf(t1,t2) = [t2 - t1,
+#=ϕf(t1,t2) = [t2 - t1,
     t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi),
     (9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40
     + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40
     + sin((4*t2*pi)/5)/640)/pi]
+    =#
+ϕf(t1,t2) = [t2 - t1,
+    t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi),
+    (9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40 + sin((4*t2*pi)/5)/640)/pi]
 Σf(t1,t2)=ϕf(t1,t2)'*Σ*ϕf(t1,t2)
 
-x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ0,Σf,ϕf)
+μf(t1,t2) = μ[1]*(t2 - t1) +
+    μ[2]*(t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi)) +
+    μ[3]*((9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40 + sin((4*t2*pi)/5)/640)/pi)
+
+x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ0)
 
 T_R = sum(t[1:2])
-risk = T_R * Σint
+risk = Σf(t0,T_R)
 @show θ_R T_R risk
 
 Σs = sum(sqrt.(x.^2+y.^2))
