@@ -31,16 +31,31 @@ include("bayeslin.jl")
 default(dpi=600)
 
 θ̇(t) = (0.1 + 0.05*cos(4*pi*t/10))
+
 ϕf(t1,t2) = [t2 - t1,
     t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi),
     (9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40 + sin((4*t2*pi)/5)/640)/pi]
+
 Σf(t1,t2)=ϕf(t1,t2)'*Σ*ϕf(t1,t2)
+
 μf(t1,t2) = μ[1]*(t2 - t1) +
     μ[2]*(t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi)) +
     μ[3]*((9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40 + sin((4*t2*pi)/5)/640)/pi)
-D(v,β=Inf) = 2/(1+exp(-5*v)) - 1 + 1/β*randn()
 
-function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ,N)
+D(v,β=Inf) = 2/(1+exp(-2*v)) - 1 + 1/β*randn()
+
+P1(t1,t2) = (t2 - t1)
+P2(t1,t2) = (t2)/10 - t1/10 - (sin((2*t1*pi)/5) -
+    sin((2*(t2)*pi)/5))/(8*pi)
+P3(t1,t2) = (9*(t2))/800 - (9*t1)/800 -
+    (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi +
+    (sin((2*(t2)*pi)/5)/40 + sin((4*(t2)*pi)/5)/640)/pi
+
+Σv(t1,t2) = P1(t1,t2)*(P1(t1,t2)*Σ[1,1] + P2(t1,t2)*Σ[2,1] + P3(t1,t2)*Σ[3,1]) +
+              P2(t1,t2)*(P1(t1,t2)*Σ[1,2] + P2(t1,t2)*Σ[2,2] + P3(t1,t2)*Σ[3,2]) +
+              P3(t1,t2)*(P1(t1,t2)*Σ[1,3] + P2(t1,t2)*Σ[2,3] + P3(t1,t2)*Σ[3,3])
+
+function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,θ,N)
 
     RDV = Model(with_optimizer(Ipopt.Optimizer,print_level=0,max_iter=1000))
     #RDV = Model(solver=CbcSolver(PrimalTolerance=1e-10))
@@ -118,14 +133,14 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ,N)
     #    5 + 4.5 * sin(2*pi*(θ + (sum(t[i] for i=1:2)
     #    - t0)*0.1 + (sum(t[i] for i=1:2)
     #    - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))))
-    @NLconstraint(RDV, x[3] == 5 - 2.5 * sin(2*pi*θ_R))
+    @NLconstraint(RDV, x[3] == 5 - 4.5 * sin(2*pi*θ_R))
     @NLconstraint(RDV, y[3] == ( 2 * θ_R - 1 ))
     #@NLconstraint(RDV, sum(t[i] for i=1:2)^2 * Σint <= 0.1)
-    if N >= 50 #activate risk bounds when enough samples
-        @NLconstraint(RDV, Σv <= 0.015)
-    else
+    #if N >= 50 #activate risk bounds when enough samples
         @NLconstraint(RDV, Σv <= 0.5)
-    end
+    #else
+    #    @NLconstraint(RDV, Σv <= 0.5)
+    #end
     @NLconstraint(RDV, θ_R <= 1.0)
     @NLconstraint(RDV, 0.0 <= θ_R)
     @constraint(RDV, x[4] == Lx)
@@ -144,11 +159,10 @@ function solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ,N)
         + sin((4*t2*pi)/5)/640)/pi)
 
     return value.(x), value.(y), value.(vx), value.(vy), value.(t), θ_R
-
 end
 
 function path(θ)
-    x = 5 .- 2.5 .* sin.(2*pi*θ)
+    x = 5 .- 4.5 .* sin.(2*pi*θ)
     y = 2 .* θ .- 1
     return x, y
 end
@@ -181,19 +195,6 @@ end
 function μ_w(σ,V,deg,Y)
     A = gen_A(σ,V,deg)
     μ = 1/σ^2*inv(A)*basis_func(V,deg)*Y
-end
-
-function plot_path(n,bg="white")
-    θ = Array(0:1.0/n:1)
-    N = length(θ)
-    x, y = path(θ)
-    #z = θ̇.(collect(range(0,length=N,step=dt)))
-    #z = z + D.(z)
-    t0 = 0.0.*ones(N)
-    t = collect(range(0,length=N,step=dt))
-    z = Σf.(t0,t)
-    mcgrad = cgrad([:red, :yellow, :blue])
-    plot!(x,y,background_color=bg,lc=mcgrad,line_z=z,width=3.0)
 end
 
 function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:2; seeded=false)
@@ -229,20 +230,22 @@ function run_fit(N)
 end
 
 function find_t_end(μf,tmax)
-    for t=0:0.001:tmax
-        if μf(0.0,t) >= 1.0
-            return t
+    for c=0:0.001:tmax
+        if μf(0.0,c) >= 1.0
+            return c
         end#end if
     end#end for
-    @show μf(0.0,t)
+    @show μf(0.0,tmax)
     error("Couldn't find end of trajectory")
 end#end fun
 
 function plot_sol(bg="black")
     μ, Σ = fit_weights(N)
-    x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,Σint,θ0,N)
+    tmax = 30.0
+    tmax = find_t_end(μf,tmax)
+    x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,t0,Lx,Ly,Rx,Ry,vmax,tmax,rem_power,μ,θ0,N)
     T_R = sum(t[1:2])
-    risk = Σf(t0,T_R)
+    risk = Σv(t0,T_R)
     @show θ_R T_R risk
     Σe = vx'.^2*t + vy'.^2*t
     Σs = sum(sqrt.(x.^2+y.^2))
@@ -257,43 +260,45 @@ function plot_sol(bg="black")
     println("Checking Rendezvous condition")
     @show Δx Δy
     println("Checking constraints:")
-    @show Σe Σs Σt Δt
+    @show Σe Σs Σt Δt tmax
 
     plot(x[1:4],y[1:4],background_color=bg,width=3.0)
     plot!([x[2];x[5]],[y[2];y[5]],background_color=bg,width=3.0,color="red")
-    plot_path(100,bg)
+    plot_path(1000,bg)
     scatter!(x[1:4],y[1:4],background_color=bg,markersize=10.0)
     scatter!(p,legend=false,background_color=bg,markersize=5.0)
+end
 
+function plot_path(n,bg="white")
+    θ = Array(0:1.0/n:1)
+    N = length(θ)
+    x, y = path(θ)
+    #z = θ̇.(collect(range(0,length=N,step=dt)))
+    #z = z + D.(z)
+    t0 = 0.0.*ones(N)
+    t = collect(range(0,length=N,stop=tmax))
+    z = Σv.(t0,t)
+    mcgrad = cgrad([:red, :yellow, :blue])
+    plot!(x,y,background_color=bg,lc=mcgrad,line_z=z,width=3.0)
 end
 
 x0          = 1.0
 y0          = 1.0
 t0          = 0.0
 θ0          = 0.0
-Lx          = 6.0
+Lx          = 3.0
 Ly          = -0.5
 Rx          = 1.0
 Ry          = 1.0
 vmax        = 10.0
 tmax        = 10.0
 dt          = 0.1
-rem_power   = 50.0
+rem_power   = 1000.0
 N           = 51
 
 clearconsole()
-
-#@btime solveRDV($x0,$y0,$Lx,$Ly,$Rx,$Ry,$vmin,$vmax,$tmax,$rem_power,$x0,$y0)
-#@show bench
-
-μ, Σ = fit_weights(N)
-
-tmax = find_t_end(μf,tmax)
-
-θf(t) = 0.1 + sin(t)
-Σint = (0.1.^collect(1:length(μ))'*Σ*0.1.^collect(1:length(μ)))[1]
 #Σf(t) = (θf(t).^collect(1:length(μ))'*Σ*θf(t).^collect(1:length(μ)))[1]
-run_fit()
+run_fit(10)
 plot_sol()
 
-@btime solveRDV($x0,$y0,$t0,$Lx,$Ly,$Rx,$Ry,$vmax,$tmax,$rem_power,$μ,$Σint,$θ0,$N)
+#@btime solveRDV($x0,$y0,$t0,$Lx,$Ly,$Rx,$Ry,$vmax,$tmax,$rem_power,$μ,$Σint,$θ0,$N)
