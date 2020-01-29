@@ -9,7 +9,7 @@ syms theta_d
 syms t t1 t2
 syms tt
 
-theta = (0.1 + 0.05*cos(4*pi*t/10));
+theta = (0.01 + 0.01*cos(4*pi*t/10));
 
 for i=0:r
     phi(i+1) = int(theta^i,t,t1,t2);
