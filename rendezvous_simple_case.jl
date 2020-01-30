@@ -529,6 +529,7 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power)
 end
 
 function genfigs(N,x0,y0,t0,θ0)
+    bg = "white"
     seed!(1729)
     yh = y0
     xh = x0
@@ -536,7 +537,7 @@ function genfigs(N,x0,y0,t0,θ0)
     vyh = 0.0
     dt = 0.2
     θ̇(t) = (0.1 .+ 0.1.*cos.(4*pi.*t/10))
-    vx, vy = plot_sol(N,"black",t0,θ0,x0,y0)
+    vx, vy = plot_sol(N,bg,t0,θ0,x0,y0)
     s = @sprintf("plot_%d",0)
     savefig(s)
     for i=1:30
@@ -546,7 +547,7 @@ function genfigs(N,x0,y0,t0,θ0)
         θ0 = θ0 + θ̇(t0)/1*dt
         x0 = x0+vx*dt
         y0 = y0+vy*dt
-        vx, vy = plot_sol(N+10*i,"black",t0,θ0,x0,y0)
+        vx, vy = plot_sol(N+10*i,bg,t0,θ0,x0,y0)
         xh = [xh x0]
         yh = [yh y0]
         vxh = [vxh vx]
@@ -579,7 +580,7 @@ clearconsole()
 seed!(1729)
 #MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power)
 seed!(1729)
-plot_sol(N,"black",t0,θ0,x0,y0)
+plot_sol(N,"white",t0,θ0,x0,y0)
 seed!(1729)
 genfigs(N,x0,y0,t0,θ0)
 #=
