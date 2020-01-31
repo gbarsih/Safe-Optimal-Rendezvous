@@ -29,7 +29,7 @@ using Printf
 import Distributions: MvNormal
 import Random.seed!
 include("bayeslin.jl")
-default(dpi=100)
+default(dpi=600)
 
 function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0.0)
 
@@ -194,7 +194,7 @@ function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:2; seeded=false)
     if seeded
         seed!(1729)
     end
-    Xo = 1/3 .+ rand(N)./2 #random samples
+    Xo = 0 .+ rand(N)./1.0 #random samples
     Yo = D.(Xo, β) #observed deviation
     Xt = collect(-0.0:0.005:1.2)
     Yt = D.(Xt) #actual deviation
@@ -225,7 +225,7 @@ end
 
 function run_fit(N)
     model = fit_behavior(N, 0.005, 1/(0.3^2), 0:2)
-    plot(model, xlabel="Historic Speed", ylabel="Driver's Speed",background_color="black")
+    plot(model, xlabel="Historic Speed", ylabel="Driver's Speed",background_color="white",xlims=(0,1),ylims=(0,1.5))
 end
 
 function find_t_end(μf,tmax,tbound,θ0=0.0,t0=0.0)
@@ -582,7 +582,8 @@ seed!(1729)
 seed!(1729)
 plot_sol(N,"white",t0,θ0,x0,y0)
 seed!(1729)
-genfigs(N,x0,y0,t0,θ0)
+run_fit(50)
+#genfigs(N,x0,y0,t0,θ0)
 #=
 #Σf(t) = (θf(t).^collect(1:length(μ))'*Σ*θf(t).^collect(1:length(μ)))[1]
 μ, Σ = fit_weights(N)
