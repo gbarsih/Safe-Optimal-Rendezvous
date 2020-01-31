@@ -34,7 +34,6 @@ default(dpi=100)
 function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0.0)
 
     RDV = Model(with_optimizer(Ipopt.Optimizer,print_level=0,max_iter=500))
-    #RDV = Model(solver=CbcSolver(PrimalTolerance=1e-10))
     @variable(RDV, x[i=1:5]) #states
     @variable(RDV, y[i=1:5]) #states
 
@@ -47,11 +46,6 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0
     r = length(μ)
     t1 = t0
     t2 = @expression(RDV, t[2])
-
-    #[t2 - t1,
-    #t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi),
-    #(3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 + sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 + sin((4*t2*pi)/5)/16000)/pi]
-
     θ_R = @NLexpression(RDV, θ + μ[1]*((t[1] + t[2]) - t1) +
         μ[2]*((t[1] + t[2])/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*(t[1]
         + t[2])*pi)/5))/(40*pi)) +
@@ -65,20 +59,6 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0
     + sin((4*t1*pi)/5)/16000)/pi + (sin((2*(t[1] + t[2])*pi)/5)/2000
     + sin((4*(t[1] + t[2])*pi)/5)/16000)/pi))
 
-    #=θ_R = @NLexpression(RDV, θ + μ[1]*((t[1] + t[2]) - t1) +
-        μ[2]*((t[1] + t[2])/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*(t[1]
-        + t[2])*pi)/5))/(8*pi)) +
-        μ[3]*((9*(t[1] + t[2]))/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40
-        + sin((4*t1*pi)/5)/640)/pi + (sin((2*(t[1] + t[2])*pi)/5)/40
-        + sin((4*(t[1] + t[2])*pi)/5)/640)/pi))
-    P1 = @NLexpression(RDV, (t[1] + t[2]) - t1)
-    P2 = @NLexpression(RDV, (t[1] + t[2])/10 - t1/10 - (sin((2*t1*pi)/5) -
-        sin((2*(t[1] + t[2])*pi)/5))/(8*pi))
-    P3 = @NLexpression(RDV, (9*(t[1] + t[2]))/800 - (9*t1)/800 -
-        (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi +
-        (sin((2*(t[1] + t[2])*pi)/5)/40 + sin((4*(t[1] +
-        t[2])*pi)/5)/640)/pi)=#
-
     Σv = @NLexpression(RDV, P1*(P1*Σ[1,1] + P2*Σ[2,1] + P3*Σ[3,1]) +
                             P2*(P1*Σ[1,2] + P2*Σ[2,2] + P3*Σ[3,2]) +
                             P3*(P1*Σ[1,3] + P2*Σ[2,3] + P3*Σ[3,3]))
@@ -88,7 +68,7 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0
                 + 0.3*(vx[3]^2*t[3] + vy[3]^2*t[3]) #cost fcn after delivery
                 + 0.0*sum(t[i] for i=2:4)   #cost fcn min time
                 + 1.0*(N>=100)*Σv # activate risk min when samples are enough
-                - 1000.0*(Σv<=0.1)*t[1]) #cost fcn max decision time
+                - 1000.0*(Σv>=0.05)*t[1]) #cost fcn max decision time
     #@NLconstraint(RDV, abs(t[1] - tt[1]) <= 0.1)
     @constraint(RDV, 2.0 .<= tt[2:end])
     #@NLconstraint(RDV, abs(vp[1] - vx[1]) <= 1.3)
@@ -108,14 +88,8 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0
 
     @NLconstraint(RDV, sum((vx[i]^2 + vy[i]^2)*t[i] for i=1:3) <= rem_power)
     @NLconstraint(RDV, sum((vx[i]^2 + vy[i]^2)*t[i] for i=[1 4]) <= rem_power)
-    #TODO fix
 
 
-    #@NLconstraint(RDV, x[3] ==
-    #    5 + 4.5 * sin(2*pi*(θ + (sum(t[i] for i=1:2)
-    #    - t0)*0.1 + (sum(t[i] for i=1:2)
-    #    - t0)*sum(μ[i]*0.1^(i-1) for i=1:r))))
-    #@NLconstraint(RDV, sum(t[i] for i=1:2)^2 * Σint <= 0.1)
     if N >= 50 #activate risk bounds when enough samples
         @NLconstraint(RDV, Σv <= 2.5)
     else
@@ -134,20 +108,12 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0
     t2 = sum(value.(t)[i] for i=1:2)
     t1 = t0
 
-    #[t2 - t1,
-    #t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi),
-    #(3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 + sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 + sin((4*t2*pi)/5)/16000)/pi]
     θ_R = θ + μ[1]*(t2 - t1) +
         μ[2]*(t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi)) +
         μ[3]*((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 +
         sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 +
         sin((4*t2*pi)/5)/16000)/pi)
     @show θ_R
-    #=θ_R = θ + μ[1]*(t2 - t1) +
-        μ[2]*(t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi)) +
-        μ[3]*((9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40
-        + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40
-        + sin((4*t2*pi)/5)/640)/pi)=#
 
     return value.(x), value.(y), value.(vx), value.(vy), value.(t), θ_R
 end
@@ -156,36 +122,6 @@ function path(θ)
     x = 5 .- 4.5 .* sin.(2*pi*θ)
     y = 10 .* θ .- 5
     return x, y
-end
-
-function sim_path(θ̇, N, θ₀, tf)
-    dt = tf/N
-    θ = zeros(N)
-    θ[1] = θ₀
-    for i=2:N
-        θ[i] = θ[i-1] + θ̇(θ[i-1])*dt
-    end
-
-    if maximum(θ) > 1.0 || minimum(θ) < 0.0
-        @show maximum(θ) minimum(θ)
-        error("Θ outside unit interval!")
-    end
-
-    return θ
-end
-
-function gen_A(σ,V,deg)
-    Φ = basis_func(V,deg)
-    A = σ^(-2) .* Φ * Φ' + I
-end
-
-function basis_func(V,deg)
-    Φ = broadcast(^,V,collect(0:deg)')'
-end
-
-function μ_w(σ,V,deg,Y)
-    A = gen_A(σ,V,deg)
-    μ = 1/σ^2*inv(A)*basis_func(V,deg)*Y
 end
 
 function fit_behavior(N, α=0.005, β=1/(0.3^2), r=0:2; seeded=false)
@@ -242,22 +178,6 @@ function plot_sol(N=100,bg="black",t0=0.0,θ0=0.0,x0=0.0,y0=0.0)
 
     μ, Σ = fit_weights(N)
     θ̇(t) = (0.1 .+ 0.1.*cos.(4*pi.*t/10))
-    #=ϕf(t1,t2) = [t2 - t1,
-        t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi),
-        (9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40 + sin((4*t2*pi)/5)/640)/pi]
-    Σf(t1,t2)=ϕf(t1,t2)'*Σ*ϕf(t1,t2)
-    μf(t1,t2) = μ[1]*(t2 - t1) +
-        μ[2]*(t2/10 - t1/10 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(8*pi)) +
-        μ[3]*((9*t2)/800 - (9*t1)/800 - (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi + (sin((2*t2*pi)/5)/40 + sin((4*t2*pi)/5)/640)/pi)
-    D(v,β=Inf) = 2/(1+exp(-5*v)) - 1 + 1/β*randn()
-    P1(t1,t2) = (t2 - t1)
-    P2(t1,t2) = (t2)/10 - t1/10 - (sin((2*t1*pi)/5) -
-        sin((2*(t2)*pi)/5))/(8*pi)
-    P3(t1,t2) = (9*(t2))/800 - (9*t1)/800 -
-        (sin((2*t1*pi)/5)/40 + sin((4*t1*pi)/5)/640)/pi +
-        (sin((2*(t2)*pi)/5)/40 + sin((4*(t2)*pi)/5)/640)/pi
-
-    =#
 
     ϕf(t1,t2) = [t2 - t1,
         (t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi)),
@@ -294,31 +214,18 @@ function plot_sol(N=100,bg="black",t0=0.0,θ0=0.0,x0=0.0,y0=0.0)
     p = path(θ_R)
     Δx = abs(x[3] - p[1])
     Δy = abs(y[3] - p[2])
-
-    #println("Displaying resulting trajectory:")
     @show x y vx vy t
-    #println("Checking Rendezvous condition")
-    #@show Δx Δy
-    #println("Checking constraints:")
-    #@show Σe Σs Σt Δt tmax
-
-    # plot(x[1:4],y[1:4],background_color=bg,width=3.0)
-    # plot!([x[2];x[5]],[y[2];y[5]],background_color=bg,width=3.0,color="red",linestyle=:dash)
-    # plot_path(100,Σ,t0,θ0,tmax,bg)
-    # scatter!(x[2:4],y[2:4],background_color=bg,markersize=7.0)
-    # scatter!([x[1]],[y[1]],background_color=bg,markersize=12.0,color=:blue,markershape=:utriangle)
-    # scatter!([x[2];x[5]],[y[2];y[5]],background_color=bg,markersize=7.0,color="red")
-    # scatter!(p,legend=false,background_color=bg,markersize=5.0)
-    # scatter!(path(θ0),background_color=bg,markersize=12.0,markershape=:star5)
-    # scatter!([x[1]],[y[1]],background_color=bg,markersize=12.0,color=:blue,markershape=:utriangle)
-    plot(x[1:3],y[1:3],background_color=bg,width=3.0,color=:cyan)
-    plot!([x[2] x[5]],[y[2] y[5]],background_color=bg,width=3.0,color=:grey)
-    plot!([x[3] x[4]],[y[3] y[4]],background_color=bg,width=3.0,color=:grey)
-    scatter!(x,y,background_color=bg,markersize=4.0,color=:grey)
-    scatter!([x[5]],[y[5]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:black)
+    plot()
     plot_path(1000,Σ,t0,θ0,tmax,bg)
-    scatter!(path(θ0),background_color=bg,markersize=12.0,markershape=:square)
-    p = scatter!(path(θ_R),legend=false,background_color=bg,markersize=5.0,xlims = (-1,11),ylims = (-6,6),color=:red)
+    plot!(x[1:3],y[1:3],background_color=bg,width=3.0,color=:steelblue)
+    plot!([x[2] ;x[5]],[y[2] ;y[5]],background_color=bg,width=1.0,color="gray",linestyle=:dash)
+    plot!([x[3] ;x[4]],[y[3] ;y[4]],background_color=bg,width=1.0,color="gray",linestyle=:dash)
+    scatter!(x,y,background_color=bg,markersize=3.0,color=:grey)
+    scatter!([x[1]],[y[1]],background_color=bg,markersize=7.0,markershape=:pentagon,color=:black)
+    scatter!([x[4]],[y[4]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:black)
+    scatter!([x[5]],[y[5]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:red)
+    scatter!(path(θ0),background_color=bg,markersize=10.0,markershape=:square,color=:cyan)
+    p = scatter!(path(θ_R),legend=false,background_color=bg,markersize=7.0,xlims = (-1,11),ylims = (-6,6),color=:cyan)
     display(p)
     return vx[1], vy[1]
 end
@@ -545,18 +452,18 @@ function genfigs(N,x0,y0,t0,θ0)
     xh = x0
     vxh = 0.0
     vyh = 0.0
-    dt = 0.2
+    dt = 0.1
     θ̇(t) = (0.1 .+ 0.1.*cos.(4*pi.*t/10))
     vx, vy = plot_sol(N,bg,t0,θ0,x0,y0)
     s = @sprintf("plot_%d.pdf",0)
     savefig(s)
-    for i=1:3
+    for i=1:20
         seed!(1729)
         s = @sprintf("plot_%d.pdf",i)
         t0+dt*i
         θ0 = θ0 + θ̇(t0)/1*dt
-        x0 = x0+vx*dt
-        y0 = y0+vy*dt
+        x0 = x0+vx*dt*5
+        y0 = y0+vy*dt*5
         vx, vy = plot_sol(N+10*i,bg,t0,θ0,x0,y0)
         xh = [xh x0]
         yh = [yh y0]
@@ -573,14 +480,14 @@ x0          = 10.0
 y0          = -3.0
 t0          = 0.0
 θ0          = 0.0
-Lx          = x0
+Lx          = 5.0
 Ly          = y0
-Ax          = x0
+Ax          = 7.5
 Ay          = y0
 vmax        = 5.5
 tmax        = 10.0
 dt          = 0.1
-rem_power   = 200.0
+rem_power   = 7.0
 N           = 1000
 Ni          = 5
 H           = Int(ceil(5/dt))
@@ -600,33 +507,8 @@ clearconsole()
 # ylabel!("Horizon Prediction")
 # seed!(1729)
 # plot_sol(N,"white",t0,θ0,x0,y0)
+
 seed!(1729)
 # run_fit(50)
+
 genfigs(N,x0,y0,t0,θ0)
-#=
-#Σf(t) = (θf(t).^collect(1:length(μ))'*Σ*θf(t).^collect(1:length(μ)))[1]
-μ, Σ = fit_weights(N)
-ϕf(t1,t2) = [t2 - t1,
-    (t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi)),
-    ((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 + sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 + sin((4*t2*pi)/5)/16000)/pi)]
-Σf(t1,t2)=ϕf(t1,t2)'*Σ*ϕf(t1,t2)
-μf(t1,t2) = μ[1]*(t2 - t1) +
-    μ[2]*(t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi)) +
-    μ[3]*((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 +
-    sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 +
-    sin((4*t2*pi)/5)/16000)/pi)
-P1(t1,t2) = (t2 - t1)
-P2(t1,t2) = (t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi))
-P3(t1,t2) = ((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 +
-sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 +
-sin((4*t2*pi)/5)/16000)/pi)
-
-Σv(t1,t2) = P1(t1,t2)*(P1(t1,t2)*Σ[1,1] + P2(t1,t2)*Σ[2,1] + P3(t1,t2)*Σ[3,1]) +
-            P2(t1,t2)*(P1(t1,t2)*Σ[1,2] + P2(t1,t2)*Σ[2,2] + P3(t1,t2)*Σ[3,2]) +
-            P3(t1,t2)*(P1(t1,t2)*Σ[1,3] + P2(t1,t2)*Σ[2,3] + P3(t1,t2)*Σ[3,3])
-run_fit(10)
-plot_sol(N)
-
-
-#@btime solveRDV($x0,$y0,$t0,$Lx,$Ly,$Rx,$Ry,$vmax,$tmax,$rem_power,$μ,$Σint,$θ0,$N)
-=#
