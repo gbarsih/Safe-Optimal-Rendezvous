@@ -362,12 +362,13 @@ end
 function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
     D(v,β=Inf) = 2/(1+exp(-5*v)) - 1 + 1/β*randn()
     θ̇(t) = (0.01 + 0.01*cos(4*pi*t/10))
-    α = 0.005
-    β = 1/(0.1^2)
+    α = 0.001
+    β = 1/(0.10^2)
     r = 0:2
     @assert 0<=ρ<=1 "FIR param error"
     tvec = zeros(H)
     μv = zeros(H)
+    ρv = zeros(H)
     x = zeros(H)
     y = zeros(H)
     x[1] = x0
@@ -379,7 +380,7 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
     μv[1] = μ[1]
     tt = 10*ones(4)
     vp = zeros(2)
-        for i = 2:H
+        anim = @animate for i = 2:H
             Xo = [Xo ; θ̇(θ0)]
             Yo = [Yo ; D(Xo[end], β)]
             μ0 = μ
@@ -422,14 +423,16 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
             xt, yt, rem_power, t = dynamics(xt[1], yt[1], vx[1], vy[1], t, dt, rem_power)
             x[i] = xt[1]
             y[i] = yt[1]
+            ρ = Σv(t,sum(tt[1:2]))
+            ρv[i] = ρ
             θ0 = θ0 + θ̇(θ0)*dt
             @show i
             @show tt[1]
             @show rem_power tmax
-            @show θ0 vx vy Σv(t,sum(tt[1:2]))
+            @show θ0 vx vy ρ
             if ((tt[1] <= 0.1+1e-3) && (i>=100)) || (θ_R <= θ0)
                 println("End Condition Met")
-                break
+                #break
             end
 
         end#end for
@@ -446,9 +449,10 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
         else
             println("Start abort route")
         end
-        #gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
+        gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
         tvec[end] = tvec[end-1]
-        return μv, tvec
+        ρv[end] = ρv[end-1]
+        return μv, tvec, ρv
 end
 
 function genfigs(N,x0,y0,t0,θ0)
@@ -486,22 +490,22 @@ x0          = 10.0
 y0          = -3.0
 t0          = 0.0
 θ0          = 0.0
-Lx          = 0.0
-Ly          = -y0
-Ax          = 0.5
+Lx          = 5.0
+Ly          = y0
+Ax          = 7.5
 Ay          = y0
 vmax        = 5.5
 tmax        = 10.0
 dt          = 0.1
-rem_power   = 5.0
-N           = 1000
+rem_power   = 70.0
+N           = 10
 Ni          = 5
 H           = Int(ceil(5/dt))
 
 clearconsole()
 
-# seed!(1729)
-# μfilt, tf = MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,0.2)
+seed!(1729)
+μfilt, tf, ρv = MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,0.2)
 # seed!(1729)
 # μnfilt, tu = MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,1.0)
 # plot(μfilt,label="filtered")
@@ -517,4 +521,4 @@ clearconsole()
 seed!(1729)
 # run_fit(50)
 
-genfigs(N,x0,y0,t0,θ0)
+#genfigs(N,x0,y0,t0,θ0)
