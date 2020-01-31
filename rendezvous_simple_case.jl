@@ -29,11 +29,11 @@ using Printf
 import Distributions: MvNormal
 import Random.seed!
 include("bayeslin.jl")
-default(dpi=600)
+default(dpi=100)
 
 function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0.0)
 
-    RDV = Model(with_optimizer(Ipopt.Optimizer,print_level=0,max_iter=1000))
+    RDV = Model(with_optimizer(Ipopt.Optimizer,print_level=0,max_iter=500))
     #RDV = Model(solver=CbcSolver(PrimalTolerance=1e-10))
     @variable(RDV, x[i=1:5]) #states
     @variable(RDV, y[i=1:5]) #states
@@ -282,7 +282,7 @@ function plot_sol(N=100,bg="black",t0=0.0,θ0=0.0,x0=0.0,y0=0.0)
     tmax = 10.0
     tmax = find_t_end(μf,tmax,tbound,θ0,t0)
     #@show tmax
-    x, y, vx, vy, t, θ_R = solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,N)
+    x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,N)
 
     T_R = sum(t[1:2])
     risk = Σv(t0,T_R)
@@ -302,16 +302,23 @@ function plot_sol(N=100,bg="black",t0=0.0,θ0=0.0,x0=0.0,y0=0.0)
     #println("Checking constraints:")
     #@show Σe Σs Σt Δt tmax
 
-    plot(x[1:4],y[1:4],background_color=bg,width=3.0)
-    plot!([x[2];x[5]],[y[2];y[5]],background_color=bg,width=3.0,color="red",linestyle=:dash)
-    plot_path(100,Σ,t0,θ0,tmax,bg)
-    scatter!(x[2:4],y[2:4],background_color=bg,markersize=7.0)
-    scatter!([x[1]],[y[1]],background_color=bg,markersize=12.0,color=:blue,markershape=:utriangle)
-    scatter!([x[2];x[5]],[y[2];y[5]],background_color=bg,markersize=7.0,color="red")
-    scatter!(p,legend=false,background_color=bg,markersize=5.0)
-    scatter!(path(θ0),background_color=bg,markersize=12.0,markershape=:star5)
-    scatter!([x[1]],[y[1]],background_color=bg,markersize=12.0,color=:blue,markershape=:utriangle)
-    p = scatter!(path(θ_R),legend=false,background_color=bg,markersize=5.0,xlims = (-1,11),ylims = (-6,6))
+    # plot(x[1:4],y[1:4],background_color=bg,width=3.0)
+    # plot!([x[2];x[5]],[y[2];y[5]],background_color=bg,width=3.0,color="red",linestyle=:dash)
+    # plot_path(100,Σ,t0,θ0,tmax,bg)
+    # scatter!(x[2:4],y[2:4],background_color=bg,markersize=7.0)
+    # scatter!([x[1]],[y[1]],background_color=bg,markersize=12.0,color=:blue,markershape=:utriangle)
+    # scatter!([x[2];x[5]],[y[2];y[5]],background_color=bg,markersize=7.0,color="red")
+    # scatter!(p,legend=false,background_color=bg,markersize=5.0)
+    # scatter!(path(θ0),background_color=bg,markersize=12.0,markershape=:star5)
+    # scatter!([x[1]],[y[1]],background_color=bg,markersize=12.0,color=:blue,markershape=:utriangle)
+    plot(x[1:3],y[1:3],background_color=bg,width=3.0,color=:cyan)
+    plot!([x[2] x[5]],[y[2] y[5]],background_color=bg,width=3.0,color=:grey)
+    plot!([x[3] x[4]],[y[3] y[4]],background_color=bg,width=3.0,color=:grey)
+    scatter!(x,y,background_color=bg,markersize=4.0,color=:grey)
+    scatter!([x[5]],[y[5]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:black)
+    plot_path(1000,Σ,t0,θ0,tmax,bg)
+    scatter!(path(θ0),background_color=bg,markersize=12.0,markershape=:square)
+    p = scatter!(path(θ_R),legend=false,background_color=bg,markersize=5.0,xlims = (-1,11),ylims = (-6,6),color=:red)
     display(p)
     return vx[1], vy[1]
 end
@@ -439,15 +446,15 @@ function plot_var(tf,N=100,bg="black")
     plot(t,Σv.(0.0,t),width=3.0,background_color=bg)
 end
 
-function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power)
+function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
     D(v,β=Inf) = 2/(1+exp(-5*v)) - 1 + 1/β*randn()
     θ̇(t) = (0.01 + 0.01*cos(4*pi*t/10))
     α = 0.005
     β = 1/(0.1^2)
     r = 0:2
-    ρ = 0.1
     @assert 0<=ρ<=1 "FIR param error"
-
+    tvec = zeros(H)
+    μv = zeros(H)
     x = zeros(H)
     y = zeros(H)
     x[1] = x0
@@ -455,17 +462,17 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power)
     t = 0
     Xo = rand(Ni) #random samples
     Yo = D.(Xo, β) #observed deviation
-
     μ, Σ = posterior(Yo, polynomial(Xo, r), α, β)
+    μv[1] = μ[1]
     tt = 10*ones(4)
     vp = zeros(2)
-        anim = @animate for i = 2:H
+        for i = 2:H
             Xo = [Xo ; θ̇(θ0)]
             Yo = [Yo ; D(Xo[end], β)]
             μ0 = μ
             μ, Σ = posterior(Yo, polynomial(Xo, r), α, β)
             μ =  (1-ρ).*μ0 + ρ*μ
-
+            μv[i] = μ[1]
             ϕf(t1,t2) = [t2 - t1,
                 (t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi)),
                 ((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 + sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 + sin((4*t2*pi)/5)/16000)/pi)]
@@ -487,6 +494,7 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power)
             tbound = 1000.0
             tmax = 50.0
             tmax = find_t_end(μf,tmax,tbound,θ0,t)
+            tvec[i-1] = tmax
             xt, yt, vx, vy, tt, θ_R = solveRDV(x[i-1],y[i-1],t,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,length(Xo),tt,vp)
             vp = [vx[1] vy[1]]
             Σe = vx'.^2*t + vy'.^2*t
@@ -506,7 +514,7 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power)
             @show tt[1]
             @show rem_power tmax
             @show θ0 vx vy Σv(t,sum(tt[1:2]))
-            if (tt[1] <= 0.1+1e-3) || (θ_R <= θ0)
+            if ((tt[1] <= 0.1+1e-3) && (i>=100)) || (θ_R <= θ0)
                 println("End Condition Met")
                 break
             end
@@ -525,7 +533,9 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power)
         else
             println("Start abort route")
         end
-        gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
+        #gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
+        tvec[end] = tvec[end-1]
+        return μv, tvec
 end
 
 function genfigs(N,x0,y0,t0,θ0)
@@ -538,11 +548,11 @@ function genfigs(N,x0,y0,t0,θ0)
     dt = 0.2
     θ̇(t) = (0.1 .+ 0.1.*cos.(4*pi.*t/10))
     vx, vy = plot_sol(N,bg,t0,θ0,x0,y0)
-    s = @sprintf("plot_%d",0)
+    s = @sprintf("plot_%d.pdf",0)
     savefig(s)
-    for i=1:30
+    for i=1:3
         seed!(1729)
-        s = @sprintf("plot_%d",i)
+        s = @sprintf("plot_%d.pdf",i)
         t0+dt*i
         θ0 = θ0 + θ̇(t0)/1*dt
         x0 = x0+vx*dt
@@ -570,20 +580,29 @@ Ay          = y0
 vmax        = 5.5
 tmax        = 10.0
 dt          = 0.1
-rem_power   = 20.0
+rem_power   = 200.0
 N           = 1000
-Ni          = 100
-H           = Int(ceil(40/dt))
+Ni          = 5
+H           = Int(ceil(5/dt))
 
 clearconsole()
 
+# seed!(1729)
+# μfilt, tf = MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,0.2)
+# seed!(1729)
+# μnfilt, tu = MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,1.0)
+# plot(μfilt,label="filtered")
+# plot!(μunfilt,label="raw")
+#
+# plot(tf,label="Filtered",width=2.0)
+# plot!(tu,label="Raw",width=2.0)
+# xlabel!("Control Iteration")
+# ylabel!("Horizon Prediction")
+# seed!(1729)
+# plot_sol(N,"white",t0,θ0,x0,y0)
 seed!(1729)
-#MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power)
-seed!(1729)
-plot_sol(N,"white",t0,θ0,x0,y0)
-seed!(1729)
-run_fit(50)
-#genfigs(N,x0,y0,t0,θ0)
+# run_fit(50)
+genfigs(N,x0,y0,t0,θ0)
 #=
 #Σf(t) = (θf(t).^collect(1:length(μ))'*Σ*θf(t).^collect(1:length(μ)))[1]
 μ, Σ = fit_weights(N)
