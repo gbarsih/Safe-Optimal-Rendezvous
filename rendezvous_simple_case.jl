@@ -216,7 +216,8 @@ function plot_sol(N=100,bg="black",t0=0.0,θ0=0.0,x0=0.0,y0=0.0)
     Δy = abs(y[3] - p[2])
     @show x y vx vy t
     plot()
-    plot_path(1000,Σ,t0,θ0,tmax,bg)
+    plot!(path(collect(0:0.01:1)),color="gray",width=2.0)
+    plot_path(1000,Σ,t0,θ0,tmax,bg,true)
     plot!(x[1:3],y[1:3],background_color=bg,width=3.0,color=:steelblue)
     plot!([x[2] ;x[5]],[y[2] ;y[5]],background_color=bg,width=1.0,color="gray",linestyle=:dash)
     plot!([x[3] ;x[4]],[y[3] ;y[4]],background_color=bg,width=1.0,color="gray",linestyle=:dash)
@@ -302,7 +303,7 @@ function plot_sol_filtered(μ0,N=100,bg="black")
     return μ
 end
 
-function plot_path(n,Σ,t0,θ0,tmax,bg="black")
+function plot_path(n,Σ,t0,θ0,tmax,bg="black",cgr=true)
     θ = Array(θ0:1.0/n:1)
     N = length(θ)
     x, y = path(θ)
@@ -320,8 +321,13 @@ function plot_path(n,Σ,t0,θ0,tmax,bg="black")
                 P3(t1,t2)*(P1(t1,t2)*Σ[1,3] + P2(t1,t2)*Σ[2,3] + P3(t1,t2)*Σ[3,3])
     z = Σv.(t0,t)
     #cgrad = cgrad([:red, :yellow, :blue])
-    mcgrad = cgrad([:blue, :yellow, :red])
-    plot!(x,y,background_color=bg,lc=mcgrad,line_z=z,width=3.0)
+
+    if cgr
+        mcgrad = cgrad([:blue, :yellow, :red])
+        plot!(x,y,background_color=bg,lc=mcgrad,line_z=z,width=3.0)
+    else
+        plot!(x,y,background_color=bg,width=3.0)
+    end
 end
 
 function plot_var(tf,N=100,bg="black")
@@ -480,14 +486,14 @@ x0          = 10.0
 y0          = -3.0
 t0          = 0.0
 θ0          = 0.0
-Lx          = 5.0
-Ly          = y0
-Ax          = 7.5
+Lx          = 0.0
+Ly          = -y0
+Ax          = 0.5
 Ay          = y0
 vmax        = 5.5
 tmax        = 10.0
 dt          = 0.1
-rem_power   = 7.0
+rem_power   = 5.0
 N           = 1000
 Ni          = 5
 H           = Int(ceil(5/dt))
