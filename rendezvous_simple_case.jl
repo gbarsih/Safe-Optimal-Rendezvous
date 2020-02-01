@@ -31,9 +31,9 @@ import Random.seed!
 include("bayeslin.jl")
 default(dpi=100)
 
-function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0.0)
+function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,tt=ones(4),vp=0.0)
 
-    RDV = Model(with_optimizer(Ipopt.Optimizer,print_level=0,max_iter=500))
+    RDV = Model(with_optimizer(Ipopt.Optimizer,print_level=0,max_iter=50))
     @variable(RDV, x[i=1:5]) #states
     @variable(RDV, y[i=1:5]) #states
 
@@ -113,7 +113,7 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,t=1.0,vp=0
         μ[3]*((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 +
         sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 +
         sin((4*t2*pi)/5)/16000)/pi)
-    @show θ_R
+    #@show θ_R
 
     return value.(x), value.(y), value.(vx), value.(vy), value.(t), θ_R
 end
@@ -202,7 +202,7 @@ function plot_sol(N=100,bg="black",t0=0.0,θ0=0.0,x0=0.0,y0=0.0)
     tmax = 10.0
     tmax = find_t_end(μf,tmax,tbound,θ0,t0)
     #@show tmax
-    x, y, vx, vy, t, θ_R = @time solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,N)
+    x, y, vx, vy, t, θ_R = @btime solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,N)
 
     T_R = sum(t[1:2])
     risk = Σv(t0,T_R)
@@ -359,7 +359,7 @@ function plot_var(tf,N=100,bg="black")
     plot(t,Σv.(0.0,t),width=3.0,background_color=bg)
 end
 
-function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
+function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
     D(v,β=Inf) = 2/(1+exp(-5*v)) - 1 + 1/β*randn()
     θ̇(t) = (0.01 + 0.01*cos(4*pi*t/10))
     α = 0.001
@@ -371,6 +371,7 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
     ρv = zeros(H)
     x = zeros(H)
     y = zeros(H)
+    td = zeros(H)
     x[1] = x0
     y[1] = y0
     t = 0
@@ -378,8 +379,13 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
     Yo = D.(Xo, β) #observed deviation
     μ, Σ = posterior(Yo, polynomial(Xo, r), α, β)
     μv[1] = μ[1]
-    tt = 10*ones(4)
+    tt = 1*ones(4)
     vp = zeros(2)
+    P1(t1,t2) = (t2 - t1)
+    P2(t1,t2) = (t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi))
+    P3(t1,t2) = ((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 +
+    sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 +
+    sin((4*t2*pi)/5)/16000)/pi)
         anim = @animate for i = 2:H
             Xo = [Xo ; θ̇(θ0)]
             Yo = [Yo ; D(Xo[end], β)]
@@ -387,25 +393,20 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
             μ, Σ = posterior(Yo, polynomial(Xo, r), α, β)
             μ =  (1-ρ).*μ0 + ρ*μ
             μv[i] = μ[1]
-            ϕf(t1,t2) = [t2 - t1,
-                (t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi)),
-                ((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 + sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 + sin((4*t2*pi)/5)/16000)/pi)]
-            Σf(t1,t2)=ϕf(t1,t2)'*Σ*ϕf(t1,t2)
+            # ϕf(t1,t2) = [t2 - t1,
+            #     (t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi)),
+            #     ((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 + sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 + sin((4*t2*pi)/5)/16000)/pi)]
+            # Σf(t1,t2)=ϕf(t1,t2)'*Σ*ϕf(t1,t2)
             μf(t1,t2) = μ[1]*(t2 - t1) +
                 μ[2]*(t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi)) +
                 μ[3]*((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 +
                 sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 +
                 sin((4*t2*pi)/5)/16000)/pi)
-            P1(t1,t2) = (t2 - t1)
-            P2(t1,t2) = (t2/100 - t1/100 - (sin((2*t1*pi)/5) - sin((2*t2*pi)/5))/(40*pi))
-            P3(t1,t2) = ((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 +
-            sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 +
-            sin((4*t2*pi)/5)/16000)/pi)
 
             Σv(t1,t2) = P1(t1,t2)*(P1(t1,t2)*Σ[1,1] + P2(t1,t2)*Σ[2,1] + P3(t1,t2)*Σ[3,1]) +
                         P2(t1,t2)*(P1(t1,t2)*Σ[1,2] + P2(t1,t2)*Σ[2,2] + P3(t1,t2)*Σ[3,2]) +
                         P3(t1,t2)*(P1(t1,t2)*Σ[1,3] + P2(t1,t2)*Σ[2,3] + P3(t1,t2)*Σ[3,3])
-            tbound = 1000.0
+            tbound = 100.0
             tmax = 50.0
             tmax = find_t_end(μf,tmax,tbound,θ0,t)
             tvec[i-1] = tmax
@@ -424,7 +425,8 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
             x[i] = xt[1]
             y[i] = yt[1]
             ρ = Σv(t,sum(tt[1:2]))
-            ρv[i] = ρ
+            ρv[i-1] = ρ
+            td[i-1] = tt[1]
             θ0 = θ0 + θ̇(θ0)*dt
             @show i
             @show tt[1]
@@ -449,10 +451,11 @@ function MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
         else
             println("Start abort route")
         end
-        gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
         tvec[end] = tvec[end-1]
         ρv[end] = ρv[end-1]
-        return μv, tvec, ρv
+        td[end] = td[end-1]
+        gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
+        return μv, tvec, ρv, td
 end
 
 function genfigs(N,x0,y0,t0,θ0)
@@ -494,20 +497,37 @@ Lx          = 5.0
 Ly          = y0
 Ax          = 7.5
 Ay          = y0
-vmax        = 5.5
+vmax        = 3.5
 tmax        = 10.0
 dt          = 0.1
-rem_power   = 70.0
+rem_power   = 5.0
 N           = 10
 Ni          = 5
-H           = Int(ceil(5/dt))
+H           = Int(ceil(30/dt))
 
 clearconsole()
+#@benchmark solveRDV($x0,$y0,$t0,$Lx,$Ly,$Ax,$Ay,$vmax,$tmax,$rem_power,$μ,$Σ,$θ0,$N)
 
-seed!(1729)
-μfilt, tf, ρv = MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,0.2)
-# seed!(1729)
-# μnfilt, tu = MPCfy(x0,y0,θ0,Lx,Ly,vmax,tmax,dt,Ni,H,rem_power,1.0)
+sn = 2
+seed!(sn)
+μfilt, tf, ρvf, tdf = MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2)
+# seed!(sn)
+# Ax = 5.0
+# Ay = 3.0
+# μnfilt, tu, ρvu, tdu = MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2)
+# plot(ρvf,width=2.0)
+# plot!(ρvu,width=2.0)
+# p1 = hline!([0.01],width=2.0,ylims=(0.0,0.1))
+# plot(tdf,width=2.0)
+# plot!(tdu,width=2.0)
+# p2 = hline!([0.1],width=2.0)
+# plot(p1,p2,layout=(2,1))
+
+
+
+# b = @benchmarkable solveRDV($x0,$y0,$t0,$Lx,$Ly,$Ax,$Ay,$vmax,$tmax,$rem_power,$μ,$Σ,$θ0,$N)
+# tune!(b)
+# run(b)
 # plot(μfilt,label="filtered")
 # plot!(μunfilt,label="raw")
 #
@@ -518,7 +538,7 @@ seed!(1729)
 # seed!(1729)
 # plot_sol(N,"white",t0,θ0,x0,y0)
 
-seed!(1729)
+# seed!(1729)
 # run_fit(50)
 
 #genfigs(N,x0,y0,t0,θ0)
