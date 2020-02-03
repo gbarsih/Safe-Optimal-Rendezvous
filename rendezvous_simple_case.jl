@@ -31,7 +31,7 @@ import Random.seed!
 include("bayeslin.jl")
 default(dpi=100)
 
-function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,tt=ones(4),vp=0.0)
+function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,xp,yp,tt=ones(4),vp=0.0)
 
     RDV = Model(with_optimizer(Ipopt.Optimizer,print_level=0,max_iter=50))
     @variable(RDV, x[i=1:5]) #states
@@ -67,10 +67,13 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,tt=ones(4)
                   1.0*sum(vx[i]^2*t[i] + vy[i]^2*t[i] for i=[1 2 4]) #delivery
                 + 0.3*(vx[3]^2*t[3] + vy[3]^2*t[3]) #cost fcn after delivery
                 + 0.0*sum(t[i] for i=2:4)   #cost fcn min time
-                + 1.0*(N>=100)*Σv # activate risk min when samples are enough
-                - 1000.0*(Σv>=0.05)*t[1]) #cost fcn max decision time
-    #@NLconstraint(RDV, abs(t[1] - tt[1]) <= 0.1)
-    @constraint(RDV, 2.0 .<= tt[2:end])
+                + 1.0*(N>=0)*Σv # activate risk min when samples are enough
+                - 0.0*(N>=100)*t[1] #cost fcn max decision time
+                - 1.0*t[1])
+    @NLconstraint(RDV, abs(t[1] - tt[1]) <= 0.5)
+    @NLconstraint(RDV, abs(x[2] - xp) <= 0.01)
+    @NLconstraint(RDV, abs(y[2] - yp) <= 0.01)
+    #@constraint(RDV, 2.0 .<= tt[2:end])
     #@NLconstraint(RDV, abs(vp[1] - vx[1]) <= 1.3)
     #@NLconstraint(RDV, abs(vp[2] - vy[1]) <= 1.3)
     @constraint(RDV, x[1] == x0) #initial conditions
@@ -99,6 +102,10 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,tt=ones(4)
     @NLconstraint(RDV, 0.2 + θ <= θ_R)
     @constraint(RDV, x[4] == Lx)
     @constraint(RDV, y[4] == Ly)
+    #@constraint(RDV, 0.05 <= vx[1]^2)
+    #@constraint(RDV, 0.05 <= vy[1]^2)
+    #@constraint(RDV, t[1] <= 10.0)
+    #@constraint(RDV, 0.1 <= t[1] + t[2] - (tt[1] + tt[2]))
     @constraint(RDV, sum(t[i] for i=1:3) <= tmax)
     @constraint(RDV, sum(t[i] for i=[1 4]) <= tmax)
     @NLconstraint(RDV, x[3] == 5 - 4.5 * sin(2*pi*θ_R))
@@ -369,11 +376,14 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
     tvec = zeros(H)
     μv = zeros(H)
     ρv = zeros(H)
+    ρRv = zeros(H)
     x = zeros(H)
     y = zeros(H)
     td = zeros(H)
     x[1] = x0
     y[1] = y0
+    xp = x0
+    yp = y0
     t = 0
     Xo = rand(Ni) #random samples
     Yo = D.(Xo, β) #observed deviation
@@ -410,16 +420,24 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
             tmax = 50.0
             tmax = find_t_end(μf,tmax,tbound,θ0,t)
             tvec[i-1] = tmax
-            xt, yt, vx, vy, tt, θ_R = solveRDV(x[i-1],y[i-1],t,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,length(Xo),tt,vp)
+            xt, yt, vx, vy, tt, θ_R = solveRDV(x[i-1],y[i-1],t,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,length(Xo),xp,yp,tt,vp)
             vp = [vx[1] vy[1]]
+            xp = xt[2]
+            yp = yt[2]
             Σe = vx'.^2*t + vy'.^2*t
-            bg = "black"
-            plot(xt[1:4],yt[1:4],background_color=bg,width=3.0)
-            plot!([xt[2];xt[5]],[yt[2];yt[5]],background_color=bg,width=3.0,color="red")
-            plot_path(1000,Σ,t0,θ0,tmax,bg)
-            scatter!(xt[1:4],yt[1:4],background_color=bg,markersize=10.0)
-            scatter!(path(θ0),background_color=bg,markersize=10.0,markershape=:star5)
-            p = scatter!(path(θ_R),legend=false,background_color=bg,markersize=5.0,xlims = (0,10),ylims = (-5,5))
+            bg = "white"
+            plot()
+            plot!(path(collect(0:0.01:1)),color="gray",width=2.0)
+            plot_path(1000,Σ,t0,θ0,tmax,bg,true)
+            plot!(xt[1:3],yt[1:3],background_color=bg,width=3.0,color=:steelblue)
+            plot!([xt[2] ;xt[5]],[yt[2] ;yt[5]],background_color=bg,width=1.0,color="gray",linestyle=:dash)
+            plot!([xt[3] ;xt[4]],[yt[3] ;yt[4]],background_color=bg,width=1.0,color="gray",linestyle=:dash)
+            scatter!([xt[2]],[yt[2]],background_color=bg,markersize=3.0,color=:grey)
+            scatter!([xt[1]],[yt[1]],background_color=bg,markersize=7.0,markershape=:pentagon,color=:black)
+            scatter!([xt[4]],[yt[4]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:black)
+            scatter!([xt[5]],[yt[5]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:red)
+            scatter!(path(θ0),background_color=bg,markersize=10.0,markershape=:square,color=:cyan)
+            p = scatter!(path(θ_R),legend=false,background_color=bg,markersize=7.0,xlims = (-1,11),ylims = (-6,6),color=:cyan)
             #display(p)
             xt, yt, rem_power, t = dynamics(xt[1], yt[1], vx[1], vy[1], t, dt, rem_power)
             x[i] = xt[1]
@@ -431,10 +449,13 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
             @show i
             @show tt[1]
             @show rem_power tmax
-            @show θ0 vx vy ρ
-            if ((tt[1] <= 0.1+1e-3) && (i>=100)) || (θ_R <= θ0)
+            @show θ0 θ_R vx vy ρ
+            ρ_R = Σv(t,sum(tt[1:2]))*(abs.(vx[1:2])'*tt[1:2] + abs.(vy[1:2])'*tt[1:2])/rem_power
+            @show ρ_R
+            ρRv[i-1] = ρ_R
+            if ((tt[1] <= 2.0+1e-3) && (i>=100)) || ((ρ_R >= 1.0) && (i>=100))
                 println("End Condition Met")
-                #break
+                break
             end
 
         end#end for
@@ -442,20 +463,22 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
         Σv(t1,t2) = P1(t1,t2)*(P1(t1,t2)*Σ[1,1] + P2(t1,t2)*Σ[2,1] + P3(t1,t2)*Σ[3,1]) +
                     P2(t1,t2)*(P1(t1,t2)*Σ[1,2] + P2(t1,t2)*Σ[2,2] + P3(t1,t2)*Σ[3,2]) +
                     P3(t1,t2)*(P1(t1,t2)*Σ[1,3] + P2(t1,t2)*Σ[2,3] + P3(t1,t2)*Σ[3,3])
-        xt, yt, vx, vy, tt, θ_R = solveRDV(x[end],y[end],t,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,length(Xo))
+        xt, yt, vx, vy, tt, θ_R = solveRDV(x[end],y[end],t,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,length(Xo),xp,yp)
+
         println("Assessing Risk:")
         ρ = Σv(t,sum(tt[1:2]))
         @show ρ
-        if ρ<=0.004
+        if ρ<=0.01
             println("Mission is a go")
         else
             println("Start abort route")
         end
         tvec[end] = tvec[end-1]
         ρv[end] = ρv[end-1]
+        ρRv[end] = ρRv[end-1]
         td[end] = td[end-1]
         gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
-        return μv, tvec, ρv, td
+        return μv, tvec, ρv, td, ρRv
 end
 
 function genfigs(N,x0,y0,t0,θ0)
@@ -497,25 +520,26 @@ Lx          = 5.0
 Ly          = y0
 Ax          = 7.5
 Ay          = y0
-vmax        = 3.5
+vmax        = 2.5
 tmax        = 10.0
 dt          = 0.1
-rem_power   = 5.0
-N           = 10
+rem_power   = 20.0
+N           = 100
 Ni          = 5
-H           = Int(ceil(30/dt))
+H           = Int(ceil(15/dt))
 
 clearconsole()
 #@benchmark solveRDV($x0,$y0,$t0,$Lx,$Ly,$Ax,$Ay,$vmax,$tmax,$rem_power,$μ,$Σ,$θ0,$N)
 
 sn = 2
 seed!(sn)
-μfilt, tf, ρvf, tdf = MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2)
+μfilt, tf, ρvf, tdf, ρRvf= MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2)
 # seed!(sn)
 # Ax = 5.0
 # Ay = 3.0
 # μnfilt, tu, ρvu, tdu = MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2)
-# plot(ρvf,width=2.0)
+p = plot(ρRvf,width=2.0)
+display(p)
 # plot!(ρvu,width=2.0)
 # p1 = hline!([0.01],width=2.0,ylims=(0.0,0.1))
 # plot(tdf,width=2.0)
