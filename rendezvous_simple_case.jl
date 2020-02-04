@@ -26,10 +26,11 @@ using RecipesBase
 using SparseArrays
 using Statistics
 using Printf
+using LaTeXStrings
 import Distributions: MvNormal
 import Random.seed!
 include("bayeslin.jl")
-default(dpi=100)
+default(dpi=600)
 
 function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,xp,yp,tt=ones(4),vp=0.0)
 
@@ -68,9 +69,9 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,xp,yp,tt=o
                 + 0.3*(vx[3]^2*t[3] + vy[3]^2*t[3]) #cost fcn after delivery
                 + 0.0*sum(t[i] for i=2:4)   #cost fcn min time
                 + 1.0*(N>=0)*Σv # activate risk min when samples are enough
-                - 0.0*(N>=100)*t[1] #cost fcn max decision time
-                - 1.0*t[1])
-    @NLconstraint(RDV, abs(t[1] - tt[1]) <= 0.5)
+                - 1.0*(N<=100)*t[1] #cost fcn max decision time
+                - 0.0*t[1])
+    @NLconstraint(RDV, abs(t[1] - tt[1]) <= 0.1)
     @NLconstraint(RDV, abs(x[2] - xp) <= 0.01)
     @NLconstraint(RDV, abs(y[2] - yp) <= 0.01)
     #@constraint(RDV, 2.0 .<= tt[2:end])
@@ -102,10 +103,8 @@ function solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ,N,xp,yp,tt=o
     @NLconstraint(RDV, 0.2 + θ <= θ_R)
     @constraint(RDV, x[4] == Lx)
     @constraint(RDV, y[4] == Ly)
-    #@constraint(RDV, 0.05 <= vx[1]^2)
-    #@constraint(RDV, 0.05 <= vy[1]^2)
+    #@NLconstraint(RDV, 0.01 <= vx[1]^2 + vy[1]^2)
     #@constraint(RDV, t[1] <= 10.0)
-    #@constraint(RDV, 0.1 <= t[1] + t[2] - (tt[1] + tt[2]))
     @constraint(RDV, sum(t[i] for i=1:3) <= tmax)
     @constraint(RDV, sum(t[i] for i=[1 4]) <= tmax)
     @NLconstraint(RDV, x[3] == 5 - 4.5 * sin(2*pi*θ_R))
@@ -209,8 +208,7 @@ function plot_sol(N=100,bg="black",t0=0.0,θ0=0.0,x0=0.0,y0=0.0)
     tmax = 10.0
     tmax = find_t_end(μf,tmax,tbound,θ0,t0)
     #@show tmax
-    x, y, vx, vy, t, θ_R = @btime solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,N)
-
+    x, y, vx, vy, t, θ_R = @btime solveRDV(x0,y0,t0,Lx,Ly,Ax,Ay,vmax,tmax,rem_power,μ,Σ,θ0,N,x0,y0)
     T_R = sum(t[1:2])
     risk = Σv(t0,T_R)
     #@show θ_R T_R risk
@@ -366,7 +364,7 @@ function plot_var(tf,N=100,bg="black")
     plot(t,Σv.(0.0,t),width=3.0,background_color=bg)
 end
 
-function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
+function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(0.10^2))
     D(v,β=Inf) = 2/(1+exp(-5*v)) - 1 + 1/β*randn()
     θ̇(t) = (0.01 + 0.01*cos(4*pi*t/10))
     α = 0.001
@@ -446,9 +444,10 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2)
             ρv[i-1] = ρ
             td[i-1] = tt[1]
             θ0 = θ0 + θ̇(θ0)*dt
+            t_power = (abs.(vx[1:3])'*tt[1:3] + abs.(vy[1:3])'*tt[1:3])
             @show i
             @show tt[1]
-            @show rem_power tmax
+            @show rem_power t_power tmax
             @show θ0 θ_R vx vy ρ
             ρ_R = Σv(t,sum(tt[1:2]))*(abs.(vx[1:2])'*tt[1:2] + abs.(vy[1:2])'*tt[1:2])/rem_power
             @show ρ_R
@@ -522,24 +521,45 @@ Ax          = 7.5
 Ay          = y0
 vmax        = 2.5
 tmax        = 10.0
-dt          = 0.1
+dt          = 0.05
 rem_power   = 20.0
 N           = 100
 Ni          = 5
-H           = Int(ceil(15/dt))
+H           = Int(ceil(20/dt))
 
 clearconsole()
 #@benchmark solveRDV($x0,$y0,$t0,$Lx,$Ly,$Ax,$Ay,$vmax,$tmax,$rem_power,$μ,$Σ,$θ0,$N)
 
 sn = 2
 seed!(sn)
-μfilt, tf, ρvf, tdf, ρRvf= MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2)
+μfilt, tf, ρvf, tdf, ρRvf= MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2,1/(0.10^2))
+
+# upscale = 1.0 #8x upscaling in resolution
+# fntsm = Plots.font("sans-serif", pointsize=round(14.0*upscale))
+# fntlg = Plots.font("sans-serif", pointsize=round(14.0*upscale))
+# default(titlefont=fntlg, guidefont=fntlg, tickfont=fntsm, legendfont=fntsm)
+# default(size=(1000*(upscale),600*(upscale))) #Plot canvas size
+# default(width = 3.0*upscale)
+#
+# lw = 3.0*upscale
+# plot()
+# plot!(ρvf,width=lw,label=L"\rho_R")
+# plot!(ρRvf,width=lw,label=L"\rho_A")
+# hline!([0.4],width=lw,label=L"\gamma_A")
+# p1 = hline!([0.01],width=lw,label=L"\gamma_R")
+# p2 = plot(tdf,width=lw,label=L"t_1")
+# p2 = vline!([310],width=lw,label=L"t_1=\epsilon")
+# xlabel!(L"k")
+# p = plot(p1,p2,layout=(2,1))
+# display(p)
+# savefig("risktime.pdf")
+
 # seed!(sn)
-# Ax = 5.0
-# Ay = 3.0
-# μnfilt, tu, ρvu, tdu = MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2)
-p = plot(ρRvf,width=2.0)
-display(p)
+# μnfilt, tu, ρvu, tdu, ρRvu = MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2,1/(0.30^2))
+# p = plot(ρRvf,width=2.0)
+# p = plot!(ρRvu,width=2.0)
+# display(p)
+# plot(ρvf,width=2.0)
 # plot!(ρvu,width=2.0)
 # p1 = hline!([0.01],width=2.0,ylims=(0.0,0.1))
 # plot(tdf,width=2.0)
