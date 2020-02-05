@@ -403,6 +403,10 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
     P3(t1,t2) = ((3*t2)/20000 - (3*t1)/20000 - (sin((2*t1*pi)/5)/2000 +
     sin((4*t1*pi)/5)/16000)/pi + (sin((2*t2*pi)/5)/2000 +
     sin((4*t2*pi)/5)/16000)/pi)
+    epsk = 0
+    lx = 0.0
+    ly = 4.0
+    lvec = collect(range(ly, length=4, step=-0.8))
     k = 1
         anim = @animate for i = 2:H
             Xo = [Xo ; θ̇(θ0)]
@@ -438,17 +442,21 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
             rR = Σv(t,sum(tt[1:2]))
             t1 = Float64(tt[1])
             if rR <= 0.01
-                s = @sprintf("\$\\rho_R = %-15.4f\$\n\$\\rho_A = %-15.4f\$\n \$t_1 = %-15.4f\$\nRendezvous a go",rR,rA,t1)
+                s1 = @sprintf("\$\\rho_R = %-15.4f\$",rR)
+                s2 = @sprintf("\$\\rho_A = %-15.4f\$",rA)
+                s3 = @sprintf("\$t_1= %-15.4f\$",t1)
+                s4 = "Rendezvous is a go"
             else
                 s1 = @sprintf("\$\\rho_R = %-15.4f\$",rR)
                 s2 = @sprintf("\$\\rho_A = %-15.4f\$",rA)
                 s3 = @sprintf("\$t_1= %-15.4f\$",t1)
-                s4 = "Rendezvous is a go!"
+                s4 = "Rendezvous is too risky"
             end
-            plot()
-            plot!(path(collect(0:0.01:1)),color="gray",width=2.0)
-            str1 = @sprintf("\$\\mathcal{B}=%-15.4f\$",t1)
-            annotate!(2.5,4.0, text(string(s3), 20))
+            plot(path(collect(0:0.01:1)),color="gray",width=2.0)
+            annotate!(lx,lvec[1], text(string(s1), 20, :left))
+            annotate!(lx,lvec[2], text(string(s2), 20, :left))
+            annotate!(lx,lvec[3], text(string(s3), 20, :left))
+            annotate!(lx,lvec[4], text(string(s4), 20, (rR <= 0.01) ? :green : :red, :left))
             plot_path(1000,Σ,t0,θ0,tmax,bg,true)
             plot!(xt[1:3],yt[1:3],background_color=bg,width=3.0,color=:steelblue)
             plot!([xt[2] ;xt[5]],[yt[2] ;yt[5]],background_color=bg,width=1.0,color="gray",linestyle=:dash)
@@ -458,10 +466,9 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
             scatter!([xt[4]],[yt[4]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:orange)
             scatter!([xt[5]],[yt[5]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:red)
             scatter!(path(θ0),background_color=bg,markersize=10.0,markershape=:square,color=:green)
-            plot!(tickfont = Plots.font("Latin Modern Math", pointsize=round(22.0)))
             p = scatter!(path(θ_R),legend=false,background_color=bg,markersize=7.0,xlims = (-1,11),ylims = (-6,6),color=:cyan)
-            p = plot!(tickfont = Plots.font("Latin Modern Math", pointsize=round(22.0)))
-            if i in [3 152]
+            p = plot!(tickfont = Plots.font("serif", pointsize=round(22.0)))
+            if i in [3 127 233 310]
                 println("PRINTING IMAGE")
                 display(p)
                 s = @sprintf("plot_%d.pdf",k)
@@ -483,11 +490,11 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
             ρ_R = Σv(t,sum(tt[1:2]))*(abs.(vx[1:2])'*tt[1:2] + abs.(vy[1:2])'*tt[1:2])/rem_power
             # @show ρ_R
             ρRv[i-1] = ρ_R
-            if ((tt[1] <= 1.0+1e-3) && (i>=100)) || ((ρ_R >= 1.0) && (i>=100))
+            if ((tt[1] <= 1.0+1e-3) && (i>=10)) || (ρ_R >= 0.4)
                 println("End Condition Met")
+                epsk = i
                 break
             end
-
         end#end for
         μ, Σ = posterior(Yo, polynomial(Xo, r), α, β)
         Σv(t1,t2) = P1(t1,t2)*(P1(t1,t2)*Σ[1,1] + P2(t1,t2)*Σ[2,1] + P3(t1,t2)*Σ[3,1]) +
@@ -508,7 +515,7 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
         ρRv[end] = ρRv[end-1]
         td[end] = td[end-1]
         gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
-        return μv, tvec, ρv, td, ρRv
+        return μv, tvec, ρv, td, ρRv, epsk
 end
 
 function genfigs(N,x0,y0,t0,θ0)
@@ -547,17 +554,17 @@ x0          = 10.0
 y0          = -3.0
 t0          = 0.0
 θ0          = 0.0
-Lx          = 10.0
-Ly          = -y0 + 2
+Lx          = 5.0
+Ly          = y0 #+ 2
 Ax          = 7.5
-Ay          = -y0 + 2
+Ay          = y0 #+ 2
 vmax        = 2.5
 tmax        = 10.0
 dt          = 0.05
 rem_power   = 20.0
 N           = 1000
 Ni          = 5
-H           = Int(ceil(1/dt))
+H           = Int(ceil(16/dt))
 
 clearconsole()
 #@benchmark solveRDV($x0,$y0,$t0,$Lx,$Ly,$Ax,$Ay,$vmax,$tmax,$rem_power,$μ,$Σ,$θ0,$N)
@@ -575,29 +582,37 @@ default(width = 3.0*upscale)
 
 sn = 2
 seed!(sn)
-μfilt, tf, ρvf, tdf, ρRvf= MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2,1/(0.10^2))
-#
-# upscale = 2.0 #8x upscaling in resolution
-# fntsm = Plots.font("sans-serif", pointsize=round(14.0*upscale))
-# fntlg = Plots.font("sans-serif", pointsize=round(14.0*upscale))
-# default(bottom_margin=15mm)
-# default(top_margin=1mm)
-# default(right_margin=1mm)
-# default(left_margin=10mm)
-# default(titlefont=fntlg, guidefont=fntlg, tickfont=fntsm, legendfont=fntsm)
-# default(size=(1000*(upscale),600*(upscale))) #Plot canvas size
-# default(width = 3.0*upscale)
-# plot()
-# plot!(ρvf,label=L"\rho_R")
-# plot!(ρRvf,label=L"\rho_A")
-# hline!([0.4],label=L"\gamma_A")
-# p1 = hline!([0.01],label=L"\gamma_R")
-# p2 = plot(tdf,label=L"t_1")
-# p2 = vline!([152],label=L"t_1=\epsilon")
-# xlabel!(L"k")
-# p = plot(p1,p2,layout=(2,1))
-# display(p)
-# savefig("risktimefail.pdf")
+μfilt, tf, ρvf, tdf, ρRvf, epsk = MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2,1/(0.10^2))
+
+upscale = 2.0 #8x upscaling in resolution
+fntsm = Plots.font("serif", pointsize=round(14.0*upscale))
+fntlg = Plots.font("serif", pointsize=round(14.0*upscale))
+default(bottom_margin=15mm)
+default(top_margin=5mm)
+default(right_margin=5mm)
+default(left_margin=20mm)
+default(titlefont=fntlg, guidefont=fntlg, tickfont=fntsm, legendfont=fntsm)
+default(size=(800*(upscale),600*(upscale))) #Plot canvas size
+default(width = 3.0*upscale)
+plot()
+plot!(ρvf,label=L"\rho_R")
+plot!(ρRvf,label=L"\rho_A")
+hline!([0.4],label=L"\gamma_A")
+ylabel!("Risk")
+p1 = hline!([0.01],label=L"\gamma_R")
+p2 = plot(tdf,label=L"t_1")
+xlabel!(L"k")
+ylabel!(L"t_1[s]")
+if epsk > 0
+    p2 = vline!([epsk],label=L"t_1=\epsilon")
+end
+p = plot(p1,p2,layout=(2,1))
+display(p)
+savefig("risktime.pdf")
+
+
+
+
 # t0 = t0+0.1
 # θ0 = θ0+0.1
 # plot_sol(N,"white",t0,θ0,x0,y0)
