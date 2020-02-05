@@ -438,12 +438,17 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
             rR = Σv(t,sum(tt[1:2]))
             t1 = Float64(tt[1])
             if rR <= 0.01
-                s = @sprintf("rho_R = %-15.4f\n rho_A = %-15.4f\n t1 = %-15.4f\n Rendezvous is a go",rR,rA,t1)
+                s = @sprintf("\$\\rho_R = %-15.4f\$\n\$\\rho_A = %-15.4f\$\n \$t_1 = %-15.4f\$\nRendezvous a go",rR,rA,t1)
             else
-                s = @sprintf("rho_R = %-15.4f\n rho_A = %-15.4f\n t1 = %-15.4f\n Rendezvous is too risky",rR,rA,t1)
+                s1 = @sprintf("\$\\rho_R = %-15.4f\$",rR)
+                s2 = @sprintf("\$\\rho_A = %-15.4f\$",rA)
+                s3 = @sprintf("\$t_1= %-15.4f\$",t1)
+                s4 = "Rendezvous is a go!"
             end
             plot()
             plot!(path(collect(0:0.01:1)),color="gray",width=2.0)
+            str1 = @sprintf("\$\\mathcal{B}=%-15.4f\$",t1)
+            annotate!(2.5,4.0, text(string(s3), 20))
             plot_path(1000,Σ,t0,θ0,tmax,bg,true)
             plot!(xt[1:3],yt[1:3],background_color=bg,width=3.0,color=:steelblue)
             plot!([xt[2] ;xt[5]],[yt[2] ;yt[5]],background_color=bg,width=1.0,color="gray",linestyle=:dash)
@@ -452,8 +457,10 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
             scatter!([xt[1]],[yt[1]],background_color=bg,markersize=7.0,markershape=:pentagon,color=:blue)
             scatter!([xt[4]],[yt[4]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:orange)
             scatter!([xt[5]],[yt[5]],background_color=bg,markersize=7.0,markershape=:utriangle,color=:red)
-            scatter!(path(θ0),background_color=bg,markersize=10.0,markershape=:square,color=:green,annotation=(2.0,3.0,Plots.text(s, :left, 18, :bold)))
+            scatter!(path(θ0),background_color=bg,markersize=10.0,markershape=:square,color=:green)
+            plot!(tickfont = Plots.font("Latin Modern Math", pointsize=round(22.0)))
             p = scatter!(path(θ_R),legend=false,background_color=bg,markersize=7.0,xlims = (-1,11),ylims = (-6,6),color=:cyan)
+            p = plot!(tickfont = Plots.font("Latin Modern Math", pointsize=round(22.0)))
             if i in [3 152]
                 println("PRINTING IMAGE")
                 display(p)
@@ -470,13 +477,13 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
             θ0 = θ0 + θ̇(θ0)*dt
             t_power = (abs.(vx[1:3])'*tt[1:3] + abs.(vy[1:3])'*tt[1:3])
             @show i
-            @show tt[1]
-            @show rem_power t_power tmax
-            @show θ0 θ_R vx vy ρ
+            # @show tt[1]
+            # @show rem_power t_power tmax
+            # @show θ0 θ_R vx vy ρ
             ρ_R = Σv(t,sum(tt[1:2]))*(abs.(vx[1:2])'*tt[1:2] + abs.(vy[1:2])'*tt[1:2])/rem_power
-            @show ρ_R
+            # @show ρ_R
             ρRv[i-1] = ρ_R
-            if ((tt[1] <= 1.0+1e-3) && (i>=320)) || ((ρ_R >= 1.0) && (i>=100))
+            if ((tt[1] <= 1.0+1e-3) && (i>=100)) || ((ρ_R >= 1.0) && (i>=100))
                 println("End Condition Met")
                 break
             end
@@ -550,14 +557,14 @@ dt          = 0.05
 rem_power   = 20.0
 N           = 1000
 Ni          = 5
-H           = Int(ceil(10/dt))
+H           = Int(ceil(1/dt))
 
 clearconsole()
 #@benchmark solveRDV($x0,$y0,$t0,$Lx,$Ly,$Ax,$Ay,$vmax,$tmax,$rem_power,$μ,$Σ,$θ0,$N)
 
 upscale = 1.0 #8x upscaling in resolution
-fntsm = Plots.font("sans-serif", pointsize=round(22.0*upscale))
-fntlg = Plots.font("sans-serif", pointsize=round(22.0*upscale))
+fntsm = Plots.font("serif", pointsize=round(22.0*upscale))
+fntlg = Plots.font("serif", pointsize=round(22.0*upscale))
 default(bottom_margin=1mm)
 default(top_margin=1mm)
 default(right_margin=15mm)
@@ -570,27 +577,27 @@ sn = 2
 seed!(sn)
 μfilt, tf, ρvf, tdf, ρRvf= MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,0.2,1/(0.10^2))
 #
-upscale = 1.0 #8x upscaling in resolution
-fntsm = Plots.font("sans-serif", pointsize=round(14.0*upscale))
-fntlg = Plots.font("sans-serif", pointsize=round(14.0*upscale))
-default(bottom_margin=1mm)
-default(top_margin=1mm)
-default(right_margin=1mm)
-default(left_margin=1mm)
-default(titlefont=fntlg, guidefont=fntlg, tickfont=fntsm, legendfont=fntsm)
-default(size=(1000*(upscale),600*(upscale))) #Plot canvas size
-default(width = 3.0*upscale)
-plot()
-plot!(ρvf,label=L"\rho_R")
-plot!(ρRvf,label=L"\rho_A")
-hline!([0.4],label=L"\gamma_A")
-p1 = hline!([0.01],label=L"\gamma_R")
-p2 = plot(tdf,label=L"t_1")
-p2 = vline!([152]label=L"t_1=\epsilon")
-xlabel!(L"k")
-p = plot(p1,p2,layout=(2,1))
-display(p)
-savefig("risktimefail.pdf")
+# upscale = 2.0 #8x upscaling in resolution
+# fntsm = Plots.font("sans-serif", pointsize=round(14.0*upscale))
+# fntlg = Plots.font("sans-serif", pointsize=round(14.0*upscale))
+# default(bottom_margin=15mm)
+# default(top_margin=1mm)
+# default(right_margin=1mm)
+# default(left_margin=10mm)
+# default(titlefont=fntlg, guidefont=fntlg, tickfont=fntsm, legendfont=fntsm)
+# default(size=(1000*(upscale),600*(upscale))) #Plot canvas size
+# default(width = 3.0*upscale)
+# plot()
+# plot!(ρvf,label=L"\rho_R")
+# plot!(ρRvf,label=L"\rho_A")
+# hline!([0.4],label=L"\gamma_A")
+# p1 = hline!([0.01],label=L"\gamma_R")
+# p2 = plot(tdf,label=L"t_1")
+# p2 = vline!([152],label=L"t_1=\epsilon")
+# xlabel!(L"k")
+# p = plot(p1,p2,layout=(2,1))
+# display(p)
+# savefig("risktimefail.pdf")
 # t0 = t0+0.1
 # θ0 = θ0+0.1
 # plot_sol(N,"white",t0,θ0,x0,y0)
