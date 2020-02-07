@@ -445,12 +445,12 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
                 s1 = @sprintf("\$\\rho_R = %-15.4f\$",rR)
                 s2 = @sprintf("\$\\rho_A = %-15.4f\$",rA)
                 s3 = @sprintf("\$t_1= %-15.4f\$",t1)
-                s4 = "Rendezvous is a go"
+                s4 = "Rendezvous is safe"
             else
                 s1 = @sprintf("\$\\rho_R = %-15.4f\$",rR)
                 s2 = @sprintf("\$\\rho_A = %-15.4f\$",rA)
                 s3 = @sprintf("\$t_1= %-15.4f\$",t1)
-                s4 = "Rendezvous is too risky"
+                s4 = "Rendezvous is risky"
             end
             plot(path(collect(0:0.01:1)),color="gray",width=2.0)
             annotate!(lx,lvec[1], text(string(s1), 20, :left))
@@ -471,7 +471,7 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
             if i in [3 127 233 310]
                 println("PRINTING IMAGE")
                 display(p)
-                s = @sprintf("plot_%d.pdf",k)
+                s = @sprintf("/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/Safe-Optimal-Rendezvous/plot_%d.png",k)
                 savefig(s)
                 k = k + 1
             end
@@ -514,7 +514,8 @@ function MPCfy(x0,y0,θ0,Lx,Ly,Ax,Ay,vmax,tmax,dt,Ni,H,rem_power,ρ=0.2,β = 1/(
         ρv[end] = ρv[end-1]
         ρRv[end] = ρRv[end-1]
         td[end] = td[end-1]
-        gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
+        gif(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/Safe-Optimal-Rendezvous/anim_fps30.gif", fps = 30)
+        mp4(anim, "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/Safe-Optimal-Rendezvous/anim_fps30.mp4", fps = 30)
         return μv, tvec, ρv, td, ρRv, epsk
 end
 
@@ -554,10 +555,14 @@ x0          = 10.0
 y0          = -3.0
 t0          = 0.0
 θ0          = 0.0
+# Lx          = 10.0
+# Ly          = -y0 + 2
+# Ax          = 7.5
+# Ay          = -y0 + 2
 Lx          = 5.0
-Ly          = y0 #+ 2
+Ly          = y0
 Ax          = 7.5
-Ay          = y0 #+ 2
+Ay          = y0
 vmax        = 2.5
 tmax        = 10.0
 dt          = 0.05
@@ -608,7 +613,7 @@ if epsk > 0
 end
 p = plot(p1,p2,layout=(2,1))
 display(p)
-savefig("risktime.pdf")
+savefig("risktimefail.pdf")
 
 
 
