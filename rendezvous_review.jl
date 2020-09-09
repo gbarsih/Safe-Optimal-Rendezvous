@@ -40,7 +40,7 @@ function uav_dynamics(x, y, vx, vy, dt, rem_power = Inf, vmax = Inf, m = 1.0)
     vy < -vmax ? -vmax : vy
     x = x + vx * dt
     y = y + vy * dt
-    rem_power = rem_power - vx^2 * m / 2 * dt - vy^2 * m / 2 * dt
+    rem_power = rem_power - vx^2 * m / 2 * dt - vy^2 * m / 2 * dt - 1*dt
     return x, y, rem_power
 end
 
@@ -69,11 +69,19 @@ end
 
 function speed_profile(t)
     # This is the historical speed profile
-    1 / 200 .- (t ./ 2000 .- 1 / 20) .^ 2
+    #1/100 .- 1/20000 .*t
+    1/200
 end
 
 function position_profile(t)
-    -t^3 / 12000000 + t^2 / 40000 + t / 400 + 1 / 12
+    #-t^3 / 12000000 + t^2 / 40000 + t / 400 + 1 / 12
+    #-(t.*(t .- 400))./40000
+    t./200
+end
+
+function time_profile(θd)
+    #200 - 20000*(1/10000 - θd/10000)^(1/2)
+    200*θd
 end
 
 function animate_entities()
@@ -123,7 +131,7 @@ function basicMPC(
     @variable(MPC, 0.1 <= t[i = 1:4]) #controls
     t1 = t0
     t_R = @NLexpression(MPC, t[2] + t[1] + t0)
-    θ_R = @NLexpression(MPC, -t_R^3 / 12000000 + t_R^2 / 40000 + t_R / 400 + 1 / 12)
+    θ_R = @NLexpression(MPC, -(t_R*(t_R - 400))/40000)
     @NLobjective(
         MPC,
         Min,
@@ -159,6 +167,10 @@ end
 
 function deterministicMPC(
     θd,
+    PNRp,
+    vxp,
+    vyp,
+    θRp,
     t0 = 0.0,
     x = [500.0, 0.0],
     L = [500.0, 0.0],
@@ -178,8 +190,11 @@ function deterministicMPC(
     @variable(MPC, -vmax <= vx[i = 1:4] <= vmax) #controls
     @variable(MPC, -vmax <= vy[i = 1:4] <= vmax) #controls
     @variable(MPC, 0.1 <= t[i = 1:4]) #controls
-    t_R = @NLexpression(MPC, t[2] + t[1] + t0)
-    θ_R = @NLexpression(MPC, -t_R^3 / 12000000 + t_R^2 / 40000 + t_R / 400 + 1 / 12)
+    t_i = time_profile(θd) #relative adjusted time
+    t_R = @NLexpression(MPC, t[2] + t[1] + t0) #absolute rendezvous time
+    t_a = @NLexpression(MPC, t_R - t0 + t_i) #adjusted rendezvous time
+    #θ_R = @NLexpression(MPC, -(t_a*(t_a - 400))/40000) #rendezvous location
+    θ_R = @NLexpression(MPC, t_a/200) #rendezvous location
     @NLobjective(
         MPC,
         Min,
@@ -187,14 +202,25 @@ function deterministicMPC(
         1.0 * (vx[3]^2 * t[3] + vy[3]^2 * t[3])
     )
 
+    r = 10
+    sr = 0.3;
+    tr = 0.3;
+
+    @constraint(MPC, (PNRp[1] - PNR[1])^2 <= r^2)
+    @constraint(MPC, (PNRp[2] - PNR[2])^2 <= r^2)
+    for i=1:4
+        @constraint(MPC, (vxp[i] - vx[i])^2 <= sr^2)
+        @constraint(MPC, (vyp[i] - vy[i])^2 <= sr^2)
+    end
+    @NLconstraint(MPC, (θRp - θ_R)^2 <= tr^2)
     @constraint(MPC, PNR[1] == x[1] + vx[1] * t[1])
     @constraint(MPC, PNR[2] == x[2] + vy[1] * t[1])
     @constraint(MPC, RDV[1] == PNR[1] + vx[2] * t[2])
     @constraint(MPC, RDV[2] == PNR[2] + vy[2] * t[2])
     @constraint(MPC, L[1] == RDV[1] + vx[3] * t[3])
     @constraint(MPC, L[2] == RDV[2] + vy[3] * t[3])
-    #@constraint(MPC, L[1] == PNR[1] + vx[4]*t[4])
-    #@constraint(MPC, L[2] == PNR[2] + vy[4]*t[4])
+    @constraint(MPC, L[1] == PNR[1] + vx[4]*t[4])
+    @constraint(MPC, L[2] == PNR[2] + vy[4]*t[4])
 
     @NLconstraint(MPC, θ_R >= 0)
     @NLconstraint(MPC, θ_R <= 1)
@@ -205,8 +231,8 @@ function deterministicMPC(
     @constraint(MPC, t[1] + t[2] + t[3] <= T)
     @constraint(MPC, t[1] + t[2] + t[4] <= T)
 
-    @NLconstraint(MPC, P >= sum((vx[i]^2 + vy[i]^2) * t[i] for i = 1:3))
-    @NLconstraint(MPC, P >= sum((vx[i]^2 + vy[i]^2) * t[i] for i in [1 4]))
+    @NLconstraint(MPC, P >= sum((vx[i]^2 + vy[i]^2) * t[i] + 1*t[i] for i = 1:3))
+    @NLconstraint(MPC, P >= sum((vx[i]^2 + vy[i]^2) * t[i] + 1*t[i] for i in [1 4]))
 
     optimize!(MPC)
 
@@ -216,41 +242,86 @@ end
 function deterministicMission(
     x0 = [500.0, 0.0],
     L = [500.0, 0],
-    P = 5000.0,
+    P = 2700.0,
     T = 200.0,
+    vmax = 10.0;
     dt = 1.0,
 )
-    tv = Array(0:dt:T)
+    tv = Array(0:dt:100)
     N = length(tv)
-    θd = 0
+    distance = zeros(N)
+    power = zeros(N)
+    power_abort = zeros(N)
+    power_return = zeros(N)
+    power_rendezvous = zeros(N)
+    θv = zeros(N)
+    θd = 0.0
+    θR = 0.5
+    PNR = x0
+    Vx = [0.0, 0.0, 0.0, 0.0]
+    Vy = [0.0, 0.0, 0.0, 0.0]
     for i = 1:N
-        RDV, PNR, t, Vx, Vy = deterministicMPC(θd, tv[i], x0, L, dt, T, Inf, P)
+        RDV, PNR, t, Vx, Vy = deterministicMPC(θd, PNR, Vx, Vy, θR, tv[i], x0, L, dt, T, vmax, P)
         x = x0[1]
         y = x0[2]
         vx = Vx[1]
         vy = Vy[1]
         v = [vx vy]
-        θR = position_profile(sum(t[1:2]))
+        θR = position_profile(sum(t[1:2])+tv[i])
         x0[1], x0[2], P = uav_dynamics(x, y, vx, vy, dt, P)
-        θd = position_profile(tv[i]) #driver following prototypical profile
-        @show tv[i] θd θR x0 RDV v P
-        if norm(x0 .- path(θd)) < 5.0
+        θd = position_profile(1.00*tv[i]) #driver following prototypical profile
+        Pa = t[1]*(Vx[1]^2 + Vy[1]^2) + t[4]*(Vx[4]^2 + Vy[4]^2)
+        Pr = t[3]*(Vx[3]^2 + Vy[3]^2)
+        Pd = t[1]*(Vx[1]^2 + Vy[1]^2) + t[2]*(Vx[2]^2 + Vy[2]^2)
+        distance[i] = norm(x0 .- path(θd))
+        power[i] = P
+        power_abort[i] = Pa
+        power_return[i] = Pr
+        power_rendezvous[i] = Pd
+        θv[i] = θR
+        cRDVx = Vx[1]*t[1] + Vx[2]*t[2] + x0[1]
+        cRDVy = Vy[1]*t[1] + Vy[2]*t[2] + x0[2]
+        cLx = Vx[1]*t[1] + Vx[2]*t[2] + Vx[3]*t[3] + x0[1]
+        cLy = Vy[1]*t[1] + Vy[2]*t[2] + Vy[3]*t[3] + x0[2]
+        @show tv[i] θd θR x0 RDV v P Pa Pr Pd cRDVx cRDVy cLx cLy
+        if norm(x0 .- path(θd)) < 3.0
             println("Rendezvous Successful")
+            break
+        elseif (Pa>P+100 || Pr>P+100)
+            println("Abort Decision Triggered")
             break
         end
     end
+    @show vx vy t x0 PNR
+    return tv, distance, power, power_abort, power_return, power_rendezvous, θv
+end
+
+function testFit()
+end
+
+function plotpower(t, power, power_abort, power_return, power_rendezvous)
+    plot(t,power,label = "Available Power",lw=3)
+    plot!(t,power_return,label = "Return Power",lw=3)
+    plot!(t,power_abort,label = "Abort Power",lw=3)
+    plot!(t,power_rendezvous,label = "Rendezvous Power",lw=3)
+end
+
+function runMission()
+    t, distance, power, power_abort, power_return, power_rendezvous, θv = deterministicMission()
+    plotpower(t, power, power_abort, power_return, power_rendezvous)
+    plot!(t, distance,label = "Agent Distance",lw=3)
 end
 
 clearconsole()
-θdot = speed_profile(Array(0:1.0/100:1))
-plot(θdot)
+#θdot = speed_profile(Array(0:1.0/100:1))
+#plot(θdot)
 
 t0 = 0
 x0 = [500, 0]
 L = [500, 0]
-dt = 1 / 10
+dt = 1.0
 T = 200
-vmax = 10.0
+vmax = 15.0
 P = 2000
 
 #animate_entities()
@@ -265,5 +336,4 @@ RDV_path = path(RDV_θ)
 
 @show RDV RDVx_res RDVy_res RDV_path RDV_t RDV_θ
 
-deterministicMission()
 random_profile = false
