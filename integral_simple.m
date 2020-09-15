@@ -19,7 +19,7 @@ theta_dot = 10*(1-t/200);
 theta = int(theta_dot,t,0,t);
 S = solve(theta==theta_d,t);
 fun1 = matlabFunction(S(1));
-%fun2 = matlabFunction(S(2));
+fun2 = matlabFunction(S(2));
 % fun3 = matlabFunction(simplify(S(3)));
 
 mu = [-0.12538599914367188, 0.9138296047453065]
