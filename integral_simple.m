@@ -25,16 +25,15 @@ fun1 = matlabFunction(S(1));
 mu = [-0.12538599914367188, 0.9138296047453065]
 
 for i=0:r
-    phi(i+1) = int(theta_dot^i,t,t1,t2); 
-    phi(i+1) = theta_dot^i;
+    phi(i+1) = int(theta_dot^i,t,0,t); 
 end
 
 theta_d = 0;
 for i=0:r
     theta_d = mu(i+1)*phi(i+1) + theta_d;
 end
-theta_d = vpa(theta_d)
-td = int(theta_d,t,t1,t2)
+
+td = vpa(expand(theta_d))
 
 phi_s = char(phi);
 phi_s([1:8, end-1:end]) = []
