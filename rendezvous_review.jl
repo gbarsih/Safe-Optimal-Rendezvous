@@ -303,6 +303,183 @@ function deterministicMission(
     μv
 end
 
+function riskMPC(
+    θd,
+    PNRp,
+    vxp,
+    vyp,
+    θRp,
+    tp,
+    t0 = 0.0,
+    x = [500.0, 0.0],
+    L = [500.0, 0.0],
+    dt = 1.0,
+    T = 200.0,
+    vmax = Inf,
+    P = 5000.0,
+    random_profile = false,
+)
+    MPC =
+        Model(with_optimizer(Ipopt.Optimizer, print_level = 0, max_iter = 500))
+    @variable(MPC, PNR[i = 1:2])
+    @variable(MPC, RDV[i = 1:2])
+    @variable(MPC, -vmax <= vx[i = 1:4] <= vmax) #controls
+    @variable(MPC, -vmax <= vy[i = 1:4] <= vmax) #controls
+    @variable(MPC, 0.1 <= t[i = 1:4]) #controls
+    t_i = time_profile(θd) #relative adjusted time
+    t_R = @NLexpression(MPC, t[2] + t[1] + t0) #absolute rendezvous time
+    t_a = @NLexpression(MPC, t_R - t0 + t_i) #adjusted rendezvous time
+    θ_R = @NLexpression(MPC, -(t_a * (t_a - 400)) / 40) #rendezvous location
+        @NLobjective(
+            MPC,
+            Min,
+            mo[1] * sum(vx[i]^2 * t[i] + vy[i]^2 * t[i] for i in [1 2 4]) +
+            mo[2] * (vx[3]^2 * t[3] + vy[3]^2 * t[3])
+        )
+    #@objective(MPC, Min, sum(t[i] for i = 1:4) - 1000*t[1])
+    r = 10
+    srv = 1.0
+    srt = 0.3
+    tr = 0.3
+    #@constraint(MPC, (PNRp[1] - PNR[1])^2 <= r^2)
+    #@constraint(MPC, (PNRp[2] - PNR[2])^2 <= r^2)
+    for i = 1:4
+        #@constraint(MPC, (vxp[i] - vx[i])^2 <= srv^2)
+        #@constraint(MPC, (vyp[i] - vy[i])^2 <= srv^2)
+        #@constraint(MPC, (t[i] - t[i])^2 <= srt^2)
+    end
+    #@NLconstraint(MPC, (θRp - θ_R)^2 <= tr^2)
+    @constraint(MPC, PNR[1] == x[1] + vx[1] * t[1])
+    @constraint(MPC, PNR[2] == x[2] + vy[1] * t[1])
+    @constraint(MPC, RDV[1] == PNR[1] + vx[2] * t[2])
+    @constraint(MPC, RDV[2] == PNR[2] + vy[2] * t[2])
+    @constraint(MPC, L[1] == RDV[1] + vx[3] * t[3])
+    @constraint(MPC, L[2] == RDV[2] + vy[3] * t[3])
+    @constraint(MPC, L[1] == PNR[1] + vx[4] * t[4])
+    @constraint(MPC, L[2] == PNR[2] + vy[4] * t[4])
+    @NLconstraint(MPC, θ_R >= 0)
+    @NLconstraint(MPC, θ_R <= 1000)
+    @NLconstraint(MPC, RDV[1] == θ_R)
+    @NLconstraint(MPC, RDV[2] == θ_R)
+    @constraint(MPC, t[1] + t[2] + t[3] <= T)
+    @constraint(MPC, t[1] + t[2] + t[4] <= T)
+    @NLconstraint(
+        MPC,
+        P-100 >= sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i = 1:3)
+    )
+    @NLconstraint(
+        MPC,
+        P-100 >= sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i in [1 4])
+    )
+    optimize!(MPC)
+    return value.(RDV), value.(PNR), value.(t), value.(vx), value.(vy)
+end
+
+function riskMission(
+    x0 = [500.0, 0.0],
+    L = [500.0, 0],
+    P = 5000.0,
+    T = 150.0,
+    vmax = 10.0,
+    dt = 1.0,
+    ns = 10,
+)
+    tv = Array(0:dt:T)
+    N = length(tv)
+    distance = zeros(N)
+    power = zeros(N)
+    power_abort = zeros(N)
+    power_return = zeros(N)
+    power_rendezvous = zeros(N)
+    θv = zeros(N)
+    μv = zeros(N)
+    t1 = zeros(N)
+    θd = 0.0
+    θR = 500
+    PNR = x0
+    Vx = [0.0, 0.0, 0.0, 0.0]
+    Vy = [0.0, 0.0, 0.0, 0.0]
+    t = [10.0, 10.0, 10.0, 10.0]
+    Tm = 0
+    β = 1 / (0.2^2)
+    α = 0.005
+    tf = Array(0:1:(ns-1)) #seed GP
+    Xo = zeros(N + ns)
+    Yo = zeros(N + ns)
+    Xo[1:ns] = speed_profile(tf)
+    Yo[1:ns] = D.(Xo[1:ns], β) #observed deviation
+    μ, Σ = posterior(Yo, linear(Xo), α, β)
+    phi(t, μ) = t * μ[1] - ((t * (t - 400)) / 40) * μ[2]
+    for i = 1:N
+        RDV, PNR, t, Vx, Vy = riskMPC(
+            θd,
+            PNR,
+            Vx,
+            Vy,
+            θR,
+            t,
+            tv[i],
+            x0,
+            L,
+            dt,
+            T,
+            vmax,
+            P,
+        )
+        x = x0[1]
+        y = x0[2]
+        vx = Vx[1]
+        vy = Vy[1]
+        v = [vx vy]
+        θR = position_profile(sum(t[1:2]) + tv[i])
+        x0[1], x0[2], P = uav_dynamics(x, y, vx, vy, dt, P)
+        θd = position_profile(1.00 * tv[i]) #driver following prototypical profile
+        Xo[ns+i] = speed_profile(tv[i])
+        Yo[ns+i] = D(Xo[ns+i], β)
+        μ, Σ = posterior(Yo[1:(ns+i)], linear(Xo[1:(ns+i)]), α, β)
+        μv[i] = μ[2]
+        Pa =
+            t[1] * (Vx[1]^2 + Vy[1]^2) * mo[1] +
+            t[4] * (Vx[4]^2 + Vy[4]^2) * mo[4]
+        Pr = t[3] * (Vx[3]^2 + Vy[3]^2) * mo[3]
+        Pd =
+            t[1] * (Vx[1]^2 + Vy[1]^2) * mo[1] +
+            t[2] * (Vx[2]^2 + Vy[2]^2) * mo[2]
+        distance[i] = norm(x0 .- path(θd))
+        power[i] = P
+        power_abort[i] = Pa
+        power_return[i] = Pr
+        power_rendezvous[i] = Pd
+        θv[i] = θR
+        t1[i] = t[1]
+        cRDVx = Vx[1] * t[1] + Vx[2] * t[2] + x0[1]
+        cRDVy = Vy[1] * t[1] + Vy[2] * t[2] + x0[2]
+        cLx = Vx[1] * t[1] + Vx[2] * t[2] + Vx[3] * t[3] + x0[1]
+        cLy = Vy[1] * t[1] + Vy[2] * t[2] + Vy[3] * t[3] + x0[2]
+        dist = norm(x0 .- path(θd))
+        Tm = i
+        @show tv[i] θd θR x0 RDV dist v P Pa Pr Pd cRDVx cRDVy cLx cLy
+        if norm(x0 .- path(θd)) < 10.0
+            println("Rendezvous Successful")
+            break
+        elseif (Pa > P + 100 || Pr > P + 100)
+            println("Abort Decision Triggered")
+            break
+        end
+    end
+    @show vx vy t x0 PNR
+    return tv,
+    distance,
+    power,
+    power_abort,
+    power_return,
+    power_rendezvous,
+    θv,
+    Tm,
+    μv,
+    t1
+end
+
 function D(v, β = Inf)
     0.9 * v + 1 / β * randn()
 end
@@ -360,6 +537,27 @@ function runMission()
     plotpower(t, power, power_abort, power_return, power_rendezvous, Tm)
     plot!(t, distance, label = "Agent Distance", lw = 3, xlims = (0, t[Tm]))
     plot!(t, μv .* 1000, label = "Mu", lw = 3, xlims = (0, t[Tm]))
+end
+
+function runRiskMission()
+    default(dpi = 300)
+    default(thickness_scaling = 2)
+    default(size = [1200, 800])
+    t,
+    distance,
+    power,
+    power_abort,
+    power_return,
+    power_rendezvous,
+    θv,
+    Tm,
+    μv,
+    t1 = riskMission()
+    plotpower(t, power, power_abort, power_return, power_rendezvous, Tm)
+    plot!(t, distance, label = "Agent Distance", lw = 3, xlims = (0, t[Tm]))
+    plot!(t, μv .* 1000, label = "Mu", lw = 3, xlims = (0, t[Tm]))
+    plot!(t, t1 .* 1000, label = "t_1", lw = 3, xlims = (0, t[Tm]))
+    @show t1
 end
 
 function benchmarkDeterministic()
