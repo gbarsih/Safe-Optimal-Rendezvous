@@ -87,7 +87,7 @@ end
 
 function time_profile(θd)
     #200 - 20000*(1/10000 - θd/10000)^(1/2)
-    200 - 20*(100 - θd/10)^(1/2)
+    200 - 20 * (100 - θd / 10)^(1 / 2)
 end
 
 function animate_entities()
@@ -191,11 +191,13 @@ function deterministicMPC(
     @constraint(MPC, t[1] + t[2] + t[4] <= T)
     @NLconstraint(
         MPC,
-        P-100 >= sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i = 1:3)
+        P - 100 >=
+        sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i = 1:3)
     )
     @NLconstraint(
         MPC,
-        P-100 >= sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i in [1 4])
+        P - 100 >=
+        sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i in [1 4])
     )
     optimize!(MPC)
     return value.(RDV), value.(PNR), value.(t), value.(vx), value.(vy)
@@ -291,7 +293,6 @@ function deterministicMission(
             break
         end
     end
-    @show vx vy t x0 PNR
     return tv,
     distance,
     power,
@@ -330,12 +331,12 @@ function riskMPC(
     t_R = @NLexpression(MPC, t[2] + t[1] + t0) #absolute rendezvous time
     t_a = @NLexpression(MPC, t_R - t0 + t_i) #adjusted rendezvous time
     θ_R = @NLexpression(MPC, -(t_a * (t_a - 400)) / 40) #rendezvous location
-        @NLobjective(
-            MPC,
-            Min,
-            mo[1] * sum(vx[i]^2 * t[i] + vy[i]^2 * t[i] for i in [1 2 4]) +
-            mo[2] * (vx[3]^2 * t[3] + vy[3]^2 * t[3])
-        )
+    @NLobjective(
+        MPC,
+        Min,
+        mo[1] * sum(vx[i]^2 * t[i] + vy[i]^2 * t[i] for i in [1 2 4]) +
+        mo[2] * (vx[3]^2 * t[3] + vy[3]^2 * t[3] - 1000 * t[1])
+    )
     #@objective(MPC, Min, sum(t[i] for i = 1:4) - 1000*t[1])
     r = 10
     srv = 1.0
@@ -357,19 +358,21 @@ function riskMPC(
     @constraint(MPC, L[2] == RDV[2] + vy[3] * t[3])
     @constraint(MPC, L[1] == PNR[1] + vx[4] * t[4])
     @constraint(MPC, L[2] == PNR[2] + vy[4] * t[4])
-    @NLconstraint(MPC, θ_R >= 0)
-    @NLconstraint(MPC, θ_R <= 1000)
+    #@NLconstraint(MPC, θ_R >= 0)
+    #@NLconstraint(MPC, θ_R <= 1000)
     @NLconstraint(MPC, RDV[1] == θ_R)
     @NLconstraint(MPC, RDV[2] == θ_R)
     @constraint(MPC, t[1] + t[2] + t[3] <= T)
     @constraint(MPC, t[1] + t[2] + t[4] <= T)
     @NLconstraint(
         MPC,
-        P-100 >= sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i = 1:3)
+        P - 100 >=
+        sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i = 1:3)
     )
     @NLconstraint(
         MPC,
-        P-100 >= sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i in [1 4])
+        P - 100 >=
+        sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i in [1 4])
     )
     optimize!(MPC)
     return value.(RDV), value.(PNR), value.(t), value.(vx), value.(vy)
@@ -411,21 +414,8 @@ function riskMission(
     μ, Σ = posterior(Yo, linear(Xo), α, β)
     phi(t, μ) = t * μ[1] - ((t * (t - 400)) / 40) * μ[2]
     for i = 1:N
-        RDV, PNR, t, Vx, Vy = riskMPC(
-            θd,
-            PNR,
-            Vx,
-            Vy,
-            θR,
-            t,
-            tv[i],
-            x0,
-            L,
-            dt,
-            T,
-            vmax,
-            P,
-        )
+        RDV, PNR, t, Vx, Vy =
+            riskMPC(θd, PNR, Vx, Vy, θR, t, tv[i], x0, L, dt, T, vmax, P)
         x = x0[1]
         y = x0[2]
         vx = Vx[1]
@@ -433,7 +423,9 @@ function riskMission(
         v = [vx vy]
         θR = position_profile(sum(t[1:2]) + tv[i])
         x0[1], x0[2], P = uav_dynamics(x, y, vx, vy, dt, P)
-        θd = position_profile(1.00 * tv[i]) #driver following prototypical profile
+        #θd = position_profile(1.00 * tv[i]) #driver following prototypical profile
+        #θd = θd + speed_profile(tv[i])*dt
+        θd = θd + D(speed_profile(tv[i])) * dt
         Xo[ns+i] = speed_profile(tv[i])
         Yo[ns+i] = D(Xo[ns+i], β)
         μ, Σ = posterior(Yo[1:(ns+i)], linear(Xo[1:(ns+i)]), α, β)
@@ -465,9 +457,11 @@ function riskMission(
         elseif (Pa > P + 100 || Pr > P + 100)
             println("Abort Decision Triggered")
             break
+        elseif (t[1] < 5.0)
+            println("Risk-Based Decision Triggered")
+            break
         end
     end
-    @show vx vy t x0 PNR
     return tv,
     distance,
     power,
@@ -481,7 +475,7 @@ function riskMission(
 end
 
 function D(v, β = Inf)
-    0.9 * v + 1 / β * randn()
+    1.0 * v + 1 / β * randn()
 end
 
 function testFit(N, α = 0.005, β = 1 / (0.2^2), r = 0:2)
@@ -533,31 +527,12 @@ function runMission()
     power_rendezvous,
     θv,
     Tm,
-    μv = deterministicMission()
-    plotpower(t, power, power_abort, power_return, power_rendezvous, Tm)
-    plot!(t, distance, label = "Agent Distance", lw = 3, xlims = (0, t[Tm]))
-    plot!(t, μv .* 1000, label = "Mu", lw = 3, xlims = (0, t[Tm]))
-end
-
-function runRiskMission()
-    default(dpi = 300)
-    default(thickness_scaling = 2)
-    default(size = [1200, 800])
-    t,
-    distance,
-    power,
-    power_abort,
-    power_return,
-    power_rendezvous,
-    θv,
-    Tm,
     μv,
     t1 = riskMission()
+    @show t1
     plotpower(t, power, power_abort, power_return, power_rendezvous, Tm)
     plot!(t, distance, label = "Agent Distance", lw = 3, xlims = (0, t[Tm]))
     plot!(t, μv .* 1000, label = "Mu", lw = 3, xlims = (0, t[Tm]))
-    plot!(t, t1 .* 1000, label = "t_1", lw = 3, xlims = (0, t[Tm]))
-    @show t1
 end
 
 function benchmarkDeterministic()
@@ -567,12 +542,5 @@ function benchmarkDeterministic()
     vyp = 0.0
     θRp = 500
     tp = 0.0
-    @benchmark deterministicMPC(
-    $θd,
-    $PNRp,
-    $vxp,
-    $vyp,
-    $θRp,
-    $tp,
-    )
+    @benchmark deterministicMPC($θd, $PNRp, $vxp, $vyp, $θRp, $tp)
 end
