@@ -41,8 +41,8 @@ simplify(theta_d)
 %simplify(sin(5+4.5*sin(2*pi*(tt + theta_d))))
 simplify((tt + theta_d))
 
-Sigma = sym('S', [3 3])
-Psi = sym('P',[3 1])
+Sigma = sym('S', [2 2])
+Psi = sym('P',[2 1])
 
 simplify(Psi.'*Sigma*Psi)
 
