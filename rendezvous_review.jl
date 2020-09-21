@@ -33,8 +33,8 @@ import Random.seed!
 include("bayeslin.jl")
 default(dpi = 200)
 default(size = [1200, 800])
-theme(:juno)
-
+#theme(:juno)
+theme(:default)
 mo = [1.0 1.0 0.5 1.0]
 
 function uav_dynamics(x, y, vx, vy, dt, rem_power = Inf, vmax = Inf, m = 1.0)
@@ -409,6 +409,7 @@ function riskMission(
     θv = zeros(N)
     μv = zeros(N)
     t1 = zeros(N)
+    DSR = zeros(N)
     θd = 0.0
     θR = 500
     PNR = x0
@@ -416,7 +417,7 @@ function riskMission(
     Vy = [0.0, 0.0, 0.0, 0.0]
     t = [10.0, 10.0, 10.0, 10.0]
     Tm = 0
-    β = 1 / (0.2^2)
+    β = 1 / (3^2)
     α = 0.005
     tf = Array(0:1:(ns-1)) #seed GP
     Xo = zeros(N + ns)
@@ -463,7 +464,10 @@ function riskMission(
         cLy = Vy[1] * t[1] + Vy[2] * t[2] + Vy[3] * t[3] + x0[2]
         dist = norm(x0 .- path(θd))
         Tm = i
-        @show tv[i] θd θR x0 RDV dist v P Pa Pr Pd cRDVx cRDVy cLx cLy
+        DSRisk = DownsideRisk(x0, Σ, t, Vx, Vy, θR, L)
+        DSR[i] = DSRisk
+        #@show tv[i] θd θR x0 RDV dist v P Pa Pr Pd cRDVx cRDVy cLx cLy
+        @show DSRisk, tv[i]
         if norm(x0 .- path(θd)) < 10.0
             println("Rendezvous Successful")
             break
@@ -475,6 +479,7 @@ function riskMission(
             break
         end
     end
+    DSR[1] = DSR[2]
     return tv,
     distance,
     power,
@@ -484,11 +489,61 @@ function riskMission(
     θv,
     Tm,
     μv,
-    t1
+    t1,
+    DSR
 end
 
 function D(v, β = Inf)
-    1.1 * v + 1 / β * randn()
+    1.3 * v + 1 / β * randn()
+end
+
+function DownsideRisk(x, Σ, t, vx, vy, θR, L)
+    t_R = t[1] + t[2]
+    P1 = t_R
+    P2 = -(t_R * (t_R - 400)) / 40
+    θv = P1 * (P1 * Σ[1, 1] + P2 * Σ[2, 1]) + P2 * (P1 * Σ[1, 2] + P2 * Σ[2, 2])
+    EnergyRisk(θR, θv, x, L, t, vx, vy)
+end
+
+function EnergyRisk(θR, θv, x, L, t, vx, vy)
+    xR = path(θR)
+    xvplus = path(θR + θv)
+    xvminus = path(θR - θv)
+    OldDistance = [EuclideanDistance(x, xR) EuclideanDistance(xR, L)]
+    PlusDistance = [EuclideanDistance(x, xvplus) EuclideanDistance(xvplus, L)]
+    MinusDistance =
+        [EuclideanDistance(x, xvminus) EuclideanDistance(xvminus, L)]
+    if sum(PlusDistance) > sum(MinusDistance)
+        direction = 1.0
+        NewDistance = PlusDistance
+    else
+        direction = -1.0
+        NewDistance = MinusDistance
+    end
+    #Compute Energy Risk
+    #t_new = copy(t);
+    #t_new[2] = t[2]*NewDistance[1]/OldDistance[1]
+    #t_new[3] = t[3]*NewDistance[2]/OldDistance[2]
+    vx_new = copy(vx)
+    vy_new = copy(vy)
+    for i = 1:2
+        gain = NewDistance[i] / OldDistance[i]
+        vx_new[i+1] = vx[i+1] * gain
+        vy_new[i+1] = vy[i+1] * gain
+    end
+
+    OldEnergy = RendezvousEnergy(vx, vy, t)
+    NewEnergy = RendezvousEnergy(vx_new, vy_new, t)
+    abs(NewEnergy - OldEnergy)
+
+end
+
+function RendezvousEnergy(vx, vy, t)
+    sum((vx[i]^2 + vy[i]^2) * t[i] * mo[i] + 1 * t[i] for i in [2 3])
+end
+
+function EuclideanDistance(x1, x2)
+    sqrt((x1[1] - x2[1])^2 + (x1[2] - x2[2])^2)
 end
 
 function testFit(N = 10, α = 0.005, β = 1 / (0.2^2), r = 0:2)
@@ -505,7 +560,7 @@ function testFit(N = 10, α = 0.005, β = 1 / (0.2^2), r = 0:2)
     Yt = D.(Xt, Inf) #actual deviation
     s = @sprintf "Fit Performance at %d Seconds" N
     plot(
-        regress(Xo, Yo, Xt, Yt, polynomial, α, β, r),
+        regress(Xo, Yo, Xt, Yt, linear, α, β),
         xlabel = "Prototypical Speed [θ/s]",
         ylabel = "Driver's Speed [θ/s]",
         title = s,
@@ -570,10 +625,13 @@ function runDeterministcMission()
     #plot!(t, μv .* 1000, label = "Mu", lw = 3, xlims = (0, t[Tm])
 end
 
-function runMission()
+function runMission(s = nothing)
     default(dpi = 300)
     default(thickness_scaling = 2)
     default(size = [1200, 800])
+    if s != nothing
+        seed!(s)
+    end
     t,
     distance,
     power,
@@ -583,14 +641,19 @@ function runMission()
     θv,
     Tm,
     μv,
-    t1 = riskMission()
+    t1,
+    DSR = riskMission()
     @show t1
+    if Tm > 5
+        Tm = Tm - 3
+    end
     l = @layout [a b]
     p1 = plotpower(t, power, power_abort, power_return, power_rendezvous, Tm)
+    p1 = plot!(t, DSR, label = "Downside Risk", lw = 3, xlims = (0, t[Tm]))
     p2 = plot(t, distance, label = "Agent Distance", lw = 3, xlims = (0, t[Tm]))
     p2 = plot!(
         xlabel = "Time [s]",
-        ylabel = "Distante [m]",
+        ylabel = "Distance [m]",
         title = "UAV-Driver Distance",
     )
     plot(p1, p2, layout = l)
