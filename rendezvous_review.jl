@@ -417,7 +417,7 @@ function riskMission(
     Vy = [0.0, 0.0, 0.0, 0.0]
     t = [10.0, 10.0, 10.0, 10.0]
     Tm = 0
-    β = 1 / (3^2)
+    β = 1 / (6^2)
     α = 0.005
     tf = Array(0:1:(ns-1)) #seed GP
     Xo = zeros(N + ns)
@@ -521,9 +521,6 @@ function EnergyRisk(θR, θv, x, L, t, vx, vy)
         NewDistance = MinusDistance
     end
     #Compute Energy Risk
-    #t_new = copy(t);
-    #t_new[2] = t[2]*NewDistance[1]/OldDistance[1]
-    #t_new[3] = t[3]*NewDistance[2]/OldDistance[2]
     vx_new = copy(vx)
     vy_new = copy(vy)
     for i = 1:2
@@ -546,10 +543,10 @@ function EuclideanDistance(x1, x2)
     sqrt((x1[1] - x2[1])^2 + (x1[2] - x2[2])^2)
 end
 
-function testFit(N = 10, α = 0.005, β = 1 / (0.2^2), r = 0:2)
+function testFit(N = 10, α = 0.005, β = 1 / (0.6^2), r = 0:1)
     default(dpi = 300)
-    default(thickness_scaling = 2)
-    default(size = [1200, 800])
+    #default(thickness_scaling = 2)
+    #default(size = [1200, 800])
     t = Array(0:1:N)
     Xo = speed_profile(t)
     #Xo = 0.0 .+ rand(N) ./ 1 #random samples
@@ -558,16 +555,16 @@ function testFit(N = 10, α = 0.005, β = 1 / (0.2^2), r = 0:2)
     t = Array(0:1:200)
     Xt = speed_profile(t)
     Yt = D.(Xt, Inf) #actual deviation
-    s = @sprintf "Fit Performance at %d Seconds" N
+    s = @sprintf "Fit Performance: %ds" N
     plot(
-        regress(Xo, Yo, Xt, Yt, linear, α, β),
+        regress(Xo, Yo, Xt, Yt, polynomial, α, β, r),
         xlabel = "Prototypical Speed [θ/s]",
         ylabel = "Driver's Speed [θ/s]",
         title = s,
     )
 end
 
-function fitWeights(N = 10, α = 0.005, β = 1 / (0.3^2), r = 0:2)
+function fitWeights(N = 10, α = 0.005, β = 1 / (0.6^2), r = 0:2)
     t = Array(0:1:N)
     Xo = speed_profile(t)
     #Xo = 0.0 .+ rand(N) ./ 1 #random samples
@@ -596,6 +593,7 @@ function plotpower(
         ylabel = "Energy [J]",
         title = "Energy Profile",
         xlims = (0, t[Tm]),
+        ylims = (0, 10e3),
     )
 
 end
@@ -627,8 +625,8 @@ end
 
 function runMission(s = nothing)
     default(dpi = 300)
-    default(thickness_scaling = 2)
-    default(size = [1200, 800])
+    #default(thickness_scaling = 2)
+    #default(size = [1200, 800])
     if s != nothing
         seed!(s)
     end
@@ -649,14 +647,23 @@ function runMission(s = nothing)
     end
     l = @layout [a b]
     p1 = plotpower(t, power, power_abort, power_return, power_rendezvous, Tm)
-    p1 = plot!(t, DSR, label = "Downside Risk", lw = 3, xlims = (0, t[Tm]))
+    p1 = plot!(t, DSR, label = "Downside Potential", lw = 3, xlims = (0, t[Tm]))
+    p1 = hline!(
+        [300],
+        label = "Downside Potential Threshold",
+        lw = 3,
+        xlims = (0, t[Tm]),
+    )
     p2 = plot(t, distance, label = "Agent Distance", lw = 3, xlims = (0, t[Tm]))
     p2 = plot!(
         xlabel = "Time [s]",
         ylabel = "Distance [m]",
         title = "UAV-Driver Distance",
     )
-    plot(p1, p2, layout = l)
+    p = plot(p1, p2, layout = l)
+    display(p)
+    s = "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/Safe-Optimal-Rendezvous/energy.png"
+    savefig(s)
 end
 
 function benchmarkDeterministic()
@@ -667,4 +674,95 @@ function benchmarkDeterministic()
     θRp = 500
     tp = 0.0
     @benchmark deterministicMPC($θd, $PNRp, $vxp, $vyp, $θRp, $tp)
+end
+
+function benchmarkRisk(
+    x0 = [500.0, 0.0],
+    L = [500.0, 0],
+    P = 8000.0,
+    T = 200.0,
+    vmax = 10.0,
+    dt = 1.0,
+    ns = 30,
+)
+    tv = Array(0:dt:T)
+    N = length(tv)
+    distance = zeros(N)
+    power = zeros(N)
+    power_abort = zeros(N)
+    power_return = zeros(N)
+    power_rendezvous = zeros(N)
+    θv = zeros(N)
+    μv = zeros(N)
+    t1 = zeros(N)
+    DSR = zeros(N)
+    θd = 0.0
+    θR = 500
+    PNR = x0
+    Vx = [0.0, 0.0, 0.0, 0.0]
+    Vy = [0.0, 0.0, 0.0, 0.0]
+    t = [10.0, 10.0, 10.0, 10.0]
+    Tm = 0
+    β = 1 / (0.3^2)
+    α = 0.005
+    tf = Array(0:1:(ns-1)) #seed GP
+    Xo = zeros(N + ns)
+    Yo = zeros(N + ns)
+    Xo[1:ns] = speed_profile(tf)
+    Yo[1:ns] = D.(Xo[1:ns], β) #observed deviation
+    μ, Σ = posterior(Yo, linear(Xo), α, β)
+    phi(t, μ) = t * μ[1] - ((t * (t - 400)) / 40) * μ[2]
+    @benchmark riskMPC(
+        $θd,
+        $PNR,
+        $Vx,
+        $Vy,
+        $θR,
+        $t,
+        $μ,
+        $Σ,
+        $tv[1],
+        $x0,
+        $L,
+        $dt,
+        $T,
+        $vmax,
+        $P,
+    )
+end
+
+function plotFittingPerf(n = 10, m = 50)
+    seed!(0)
+    p1 = testFit(n)
+    seed!(0)
+    p2 = testFit(m)
+    l = @layout [a b]
+    p = plot(p1, p2, layout = l, ylims = (-5, 15))
+    display(p)
+    s = "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/Safe-Optimal-Rendezvous/fitperf.png"
+    savefig(s)
+
+
+    μl, Σl = fitWeights(n)
+    θvl(t) =
+        t .* (t .* Σl[1, 1] .+ .-(t .* (t .- 400)) ./ 40 * Σl[2, 1]) .+
+        .-(t .* (t .- 400)) ./ 40 .*
+        (t .* Σl[1, 2] .+ .-(t .* (t .- 400)) ./ 40 .* Σl[2, 2])
+    θl(t) = μl[1] .* t + μl[2] .* .-(t .* (t .- 400)) ./ 40
+
+    μh, Σh = fitWeights(m)
+    θvh(t) =
+        t .* (t .* Σh[1, 1] + .-(t .* (t .- 400)) ./ 40 * Σh[2, 1]) .+
+        .-(t .* (t .- 400)) ./ 40 .*
+        (t .* Σh[1, 2] .+ .-(t .* (t .- 400)) ./ 40 .* Σh[2, 2])
+    θh(t) = μh[1] .* t .+ μh[2] .* .-(t .* (t .- 400)) ./ 40
+
+    #t = Array(0:1:200)
+    #s1 = @sprintf("%ds",n)
+    #s2 = @sprintf("%ds",m)
+    #plot(t, θl(t), ribbon=θvl(t), label=s1)
+    #p3 = plot!(t, θh(t), ribbon=θvh(t), label=s2, xlabel="Time [s]", ylabel="")
+    #l2 = @layout [a b ; c]
+    #pf = plot(p1, p2, p3, layout = l2)
+
 end
