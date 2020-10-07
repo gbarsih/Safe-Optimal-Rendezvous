@@ -679,9 +679,9 @@ end
 function benchmarkRisk(
     x0 = [500.0, 0.0],
     L = [500.0, 0],
-    P = 8000.0,
+    P = 80000.0,
     T = 200.0,
-    vmax = 10.0,
+    vmax = 15.0,
     dt = 1.0,
     ns = 30,
 )
