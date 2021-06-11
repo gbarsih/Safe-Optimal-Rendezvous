@@ -739,8 +739,8 @@ function plotFittingPerf(n = 10, m = 50)
     l = @layout [a b]
     p = plot(p1, p2, layout = l, ylims = (-5, 15))
     display(p)
-    s = "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/Safe-Optimal-Rendezvous/fitperf.png"
-    savefig(s)
+    #s = "/Users/gabrielbarsi/Documents/GitHub/Safe-Optimal-Rendezvous/Safe-Optimal-Rendezvous/fitperf.png"
+    #savefig(s)
 
 
     μl, Σl = fitWeights(n)
